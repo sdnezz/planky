@@ -6,6 +6,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.launch
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
@@ -299,7 +303,7 @@ fun CustomDatePickerDialog(
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = if (isYearPickerMode) "ВЕРНУТЬСЯ К МЕСЯЦУ" else "ИЗМЕНИТЬ ГОД")
+                        Text(text = if (isYearPickerMode) "Вернуться" else "${currentMonth.year} год")
                         Icon(if (isYearPickerMode) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null)
                     }
                 }
@@ -463,76 +467,125 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
         initialFirstVisibleItemIndex = years.indexOf(initialYear)
     )
 
-    // Состояние для отслеживания года, который СЕЙЧАС в центре
-    var yearInCenter by remember { mutableIntStateOf(initialYear) }
-
-    // Эффект прилипания к центру
     val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
 
-    // Следим за тем, какой элемент оказался в центре после прокрутки
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (!listState.isScrollInProgress) {
+    // Определяем центральный индекс (для кнопки и цвета)
+    val centerIndex by remember {
+        derivedStateOf {
             val layoutInfo = listState.layoutInfo
-            val center = layoutInfo.viewportStartOffset + (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2
-            val closestItem = layoutInfo.visibleItemsInfo.minByOrNull {
-                Math.abs((it.offset + it.size / 2) - center)
-            }
-            closestItem?.let {
-                yearInCenter = years[it.index]
+            val visibleItems = layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) years.indexOf(initialYear)
+            else {
+                val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+                visibleItems.minByOrNull {
+                    Math.abs((it.offset + it.size / 2) - viewportCenter)
+                }?.index ?: 0
             }
         }
     }
 
+    val currentYear = years.getOrElse(centerIndex) { initialYear }
+
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .height(150.dp)
+                .height(200.dp) // Общая высота контейнера
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
-            // Линия-маркер центра
+            // Рамка выбора (всегда по центру)
             Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxWidth(0.6f)
                     .height(40.dp),
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(12.dp)
             ) {}
 
             LazyColumn(
                 state = listState,
-                flingBehavior = snapFlingBehavior, // Включаем прилипание
+                flingBehavior = snapFlingBehavior,
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                contentPadding = PaddingValues(vertical = 55.dp)
+                // Паддинг 80dp (центрирует элементы при Box 200dp и Item 40dp)
+                contentPadding = PaddingValues(vertical = 80.dp)
             ) {
                 items(years.size) { index ->
                     val year = years[index]
-                    val isCentered = year == yearInCenter
 
-                    Text(
-                        text = year.toString(),
-                        fontSize = if (isCentered) 26.sp else 18.sp,
-                        fontWeight = if (isCentered) FontWeight.ExtraBold else FontWeight.Normal,
-                        color = if (isCentered) MaterialTheme.colorScheme.primary else Color.Gray,
-                        modifier = Modifier.padding(vertical = 8.dp)
+                    val animatedColor by animateColorAsState(
+                        targetValue = if (index == centerIndex) MaterialTheme.colorScheme.primary else Color.Gray,
+                        animationSpec = tween(150), label = ""
                     )
+
+                    Box(
+                        modifier = Modifier
+                            .height(40.dp)
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                // --- НОВАЯ СТАБИЛЬНАЯ ЛОГИКА ---
+                                // 1. Получаем текущие параметры скролла
+                                val firstIdx = listState.firstVisibleItemIndex
+                                val firstOffset = listState.firstVisibleItemScrollOffset
+
+                                // 2. Вычисляем позицию текущего элемента относительно верха вьюпорта (в пикселях)
+                                // itemSize = 40.dp (нужно перевести в px, но здесь можно использовать пропорции)
+                                val itemSizePx = 40.dp.toPx()
+                                val viewportHeightPx = 200.dp.toPx()
+                                val contentPaddingPx = 80.dp.toPx()
+
+                                // Позиция Y центра элемента относительно верха контейнера
+                                val itemTopInViewport = (index - firstIdx) * itemSizePx - firstOffset + contentPaddingPx
+                                val itemCenterInViewport = itemTopInViewport + (itemSizePx / 2f)
+
+                                // 3. Расстояние от центра контейнера (100dp)
+                                val viewCenter = viewportHeightPx / 2f
+                                val dist = Math.abs(viewCenter - itemCenterInViewport)
+
+                                // 4. Порог видимости для 5 элементов (~100 пикселей)
+                                val maxDist = itemSizePx * 2.5f
+
+                                if (dist < maxDist) {
+                                    val progress = (dist / maxDist).coerceIn(0f, 1f)
+
+                                    // Плавное затухание к краям
+                                    alpha = (1f - progress * 0.9f).coerceIn(0f, 1f)
+
+                                    // Изменение размера (1.25 в центре, 0.7 на краях)
+                                    val scaleValue = (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
+                                    scaleX = scaleValue
+                                    scaleY = scaleValue
+                                } else {
+                                    alpha = 0f
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = year.toString(),
+                            fontSize = 22.sp,
+                            fontWeight = if (index == centerIndex) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = animatedColor
+                        )
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Кнопка подтверждения только для года
         Button(
-            onClick = { onYearSelected(yearInCenter) },
-            modifier = Modifier.fillMaxWidth(0.8f),
+            onClick = { onYearSelected(currentYear) },
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .height(48.dp),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text("ВЫБРАТЬ $yearInCenter ГОД")
+            Text("ВЫБРАТЬ $currentYear")
         }
     }
 }
+
 
 @Composable
 fun GoalsScreen() { Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Цели") } }
