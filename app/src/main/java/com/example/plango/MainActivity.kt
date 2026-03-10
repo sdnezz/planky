@@ -37,6 +37,22 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import java.time.LocalDate
 import java.time.format.TextStyle
 import java.util.*
@@ -56,6 +72,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen() {
     var selectedItem by remember { mutableIntStateOf(1) }
+    var showAddTaskSheet by remember { mutableStateOf(false) }
+
     val items = listOf("Цели", "Задачи", "Настройки")
     val icons = listOf(Icons.Filled.Star, Icons.Filled.List, Icons.Filled.Settings)
 
@@ -71,8 +89,20 @@ fun MainScreen() {
                     )
                 }
             }
+        },
+        floatingActionButton = {
+            if (selectedItem == 1) {
+                FloatingActionButton(
+                    onClick = { showAddTaskSheet = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
+                }
+            }
         }
     ) { innerPadding ->
+        // Основной контент экранов
         Surface(
             modifier = Modifier
                 .fillMaxSize()
@@ -84,6 +114,46 @@ fun MainScreen() {
                 1 -> TasksScreen()
                 2 -> SettingsScreen()
             }
+        }
+    }
+
+    // ВЫНОСИМ ОКНО ЗА ПРЕДЕЛЫ SCAFFOLD (чтобы перекрыть NavigationBar и FAB)
+    // Используем Box, который занимает ВЕСЬ экран поверх Scaffold
+    if (showAddTaskSheet) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // 1. Затемнение фона
+            var animateScrim by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { animateScrim = true }
+
+            AnimatedVisibility(
+                visible = animateScrim,
+                enter = fadeIn(tween(500)),
+                exit = fadeOut(tween(500))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            animateScrim = false
+                            showAddTaskSheet = false
+                        }
+                )
+            }
+
+            // 2. Окно задачи
+            AddTaskSheet(
+                onDismiss = {
+                    animateScrim = false
+                    showAddTaskSheet = false
+                },
+                onTaskAdded = {
+                    showAddTaskSheet = false
+                }
+            )
         }
     }
 }
@@ -178,6 +248,122 @@ fun TasksScreen() {
 }
 
 @Composable
+fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
+    var taskName by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Смещение для свайпа вниз
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    val animatedOffset by animateFloatAsState(
+        targetValue = offsetY,
+        animationSpec = tween(
+            durationMillis = 300,
+            easing = LinearOutSlowInEasing
+        ),
+        label = "drag_return"
+    )
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .imePadding(), // Окно прилипает к клавиатуре
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer { translationY = animatedOffset.coerceAtLeast(0f) }
+                // Реализация DRAG HANDLER
+                .draggable(
+                    orientation = Orientation.Vertical,
+                    state = rememberDraggableState { delta ->
+                        offsetY += delta
+                    },
+                    onDragStopped = {
+                        if (offsetY > 350) {
+                            keyboardController?.hide()
+                            onDismiss()
+                        } else {
+                            offsetY = 0f // Возвращаем на место
+                        }
+                    }
+                )
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { }, // Блокируем клики под окно
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 12.dp, bottom = 24.dp)
+            ) {
+                // Визуальная полоска (Drag Handle)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .width(36.dp)
+                        .height(4.dp)
+                        .background(Color.LightGray, RoundedCornerShape(2.dp))
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    text = "Новая задача",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = taskName,
+                    onValueChange = { taskName = it },
+                    placeholder = { Text("Что нужно сделать?") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = Color.LightGray
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = {
+                        if (taskName.isNotBlank()) {
+                            keyboardController?.hide()
+                            onTaskAdded(taskName)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = taskName.isNotBlank()
+                ) {
+                    Text("СОХРАНИТЬ", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun CalendarWeekPager(
     pagerState: PagerState,
     initialPage: Int,
@@ -258,14 +444,11 @@ fun DayItem(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CustomDatePickerDialog(
-    initialDate: LocalDate,
-    onDismiss: () -> Unit,
-    onConfirm: (LocalDate) -> Unit
+fun CustomDatePickerDialog(initialDate: LocalDate,
+                           onDismiss: () -> Unit,
+                           onConfirm: (LocalDate) -> Unit
 ) {
-    // currentMonth управляет тем, какой месяц/год отображает сетка
     var currentMonth by remember { mutableStateOf(initialDate.withDayOfMonth(1)) }
-    // tempSelectedDate управляет тем, какая дата выделена кружком и числом сверху
     var tempSelectedDate by remember { mutableStateOf(initialDate) }
     var isYearPickerMode by remember { mutableStateOf(false) }
 
@@ -283,7 +466,7 @@ fun CustomDatePickerDialog(
             modifier = Modifier.width(340.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                // ВЕРХНЯЯ ЧАСТЬ: Выбранная дата (зависит от tempSelectedDate)
+                // ВЕРХНЯЯ ЧАСТЬ: Выбранная дата
                 val formatter = remember(tempSelectedDate) {
                     val day = tempSelectedDate.dayOfMonth
                     val month = tempSelectedDate.month.getDisplayName(TextStyle.SHORT, Locale("ru"))
@@ -314,11 +497,8 @@ fun CustomDatePickerDialog(
                     YearPickerWheel(
                         initialYear = currentMonth.year,
                         onYearSelected = { pickedYear ->
-                            // 1. Обновляем месяц для сетки
                             currentMonth = currentMonth.withYear(pickedYear)
-                            // 2. Обновляем год у выбранной даты (чтобы заголовок сверху обновился)
                             tempSelectedDate = tempSelectedDate.withYear(pickedYear)
-                            // 3. Выходим из режима выбора года
                             isYearPickerMode = false
                         }
                     )
@@ -333,15 +513,37 @@ fun CustomDatePickerDialog(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss) { Text("ОТМЕНА") }
-                        TextButton(onClick = { onConfirm(tempSelectedDate) }) { Text("ОК") }
+                    // НИЖНЯЯ ПАНЕЛЬ С КНОПКАМИ
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween // Кнопка сброса слева, остальные справа
+                    ) {
+                        // Кнопка СБРОСИТЬ
+                        TextButton(
+                            onClick = {
+                                val now = LocalDate.now()
+                                tempSelectedDate = now
+                                currentMonth = now.withDayOfMonth(1)
+                            }
+                        ) {
+                            Text("СБРОСИТЬ", color = MaterialTheme.colorScheme.secondary)
+                        }
+
+                        Row {
+                            TextButton(onClick = onDismiss) {
+                                Text("ОТМЕНА")
+                            }
+                            TextButton(onClick = { onConfirm(tempSelectedDate) }) {
+                                Text("ОК")
+                            }
+                        }
                     }
                 }
             }
         }
     }
 }
+
 
 @Composable
 fun MonthPager(
@@ -535,7 +737,8 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
                                 val contentPaddingPx = 80.dp.toPx()
 
                                 // Позиция Y центра элемента относительно верха контейнера
-                                val itemTopInViewport = (index - firstIdx) * itemSizePx - firstOffset + contentPaddingPx
+                                val itemTopInViewport =
+                                    (index - firstIdx) * itemSizePx - firstOffset + contentPaddingPx
                                 val itemCenterInViewport = itemTopInViewport + (itemSizePx / 2f)
 
                                 // 3. Расстояние от центра контейнера (100dp)
@@ -552,7 +755,8 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
                                     alpha = (1f - progress * 0.9f).coerceIn(0f, 1f)
 
                                     // Изменение размера (1.25 в центре, 0.7 на краях)
-                                    val scaleValue = (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
+                                    val scaleValue =
+                                        (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
                                     scaleX = scaleValue
                                     scaleY = scaleValue
                                 } else {
