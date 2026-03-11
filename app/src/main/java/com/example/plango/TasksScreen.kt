@@ -1,18 +1,26 @@
 package com.example.plango
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.copy
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.forEach
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,11 +43,20 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -51,6 +68,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,15 +92,19 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import java.time.LocalDate
-import java.time.format.TextStyle
+import java.time.format.TextStyle as DateTextStyle
 import java.util.Locale
+
 
 @Composable
 fun TasksScreen() {
@@ -103,7 +126,7 @@ fun TasksScreen() {
             .minusDays(today.dayOfWeek.value.toLong() - 1)
             .plusWeeks(weekOffset.toLong())
 
-        mondayOfVisibleWeek.month.getDisplayName(TextStyle.FULL_STANDALONE, Locale("ru"))
+        mondayOfVisibleWeek.month.getDisplayName(DateTextStyle.FULL_STANDALONE, Locale("ru"))
             .replaceFirstChar { it.uppercase() } + " ${mondayOfVisibleWeek.year}"
     }
 
@@ -141,7 +164,7 @@ fun TasksScreen() {
 
         Text(
             text = if (selectedDate == today) "Задачи на сегодня"
-            else "Задачи на ${selectedDate.dayOfMonth} ${selectedDate.month.getDisplayName(TextStyle.FULL, Locale("ru"))}",
+            else "Задачи на ${selectedDate.dayOfMonth} ${selectedDate.month.getDisplayName(DateTextStyle.FULL, Locale("ru"))}",
             fontWeight = FontWeight.Medium,
             color = Color.Gray
         )
@@ -178,6 +201,8 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
     var showGoalSelector by remember { mutableStateOf(false) }
     var selectedGoal by remember { mutableStateOf<String?>(null) }
 
+    var subTasks by remember { mutableStateOf(listOf<SubTask>()) }
+
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -187,6 +212,8 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
         animationSpec = tween(durationMillis = 250, easing = LinearOutSlowInEasing),
         label = "drag_return"
     )
+    val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
@@ -206,19 +233,8 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
+                // Оставляем здесь, чтобы все окно двигалось
                 .graphicsLayer { translationY = animatedOffset.coerceAtLeast(0f) }
-                .draggable(
-                    orientation = Orientation.Vertical,
-                    state = rememberDraggableState { delta -> offsetY += delta },
-                    onDragStopped = {
-                        if (offsetY > 350) {
-                            keyboardController?.hide()
-                            onDismiss()
-                        } else {
-                            offsetY = 0f
-                        }
-                    }
-                )
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -229,129 +245,272 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
         ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 12.dp, bottom = 24.dp)
-                // УБРАЛИ animateContentSize здесь, так как он создает задержку.
-                // Теперь окно будет расширяться ровно с той скоростью,
-                // с которой AnimatedVisibility раскрывает список.
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp) // Боковые отступы перенесем ниже, чтобы зона была во всю ширину
             ) {
-                // Хендлер для свайпа
+                // ЗОНА ДЛЯ СМАХИВАНИЯ (ВЕРХНЯЯ ЧАСТЬ)
                 Box(
                     modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .width(36.dp)
-                        .height(4.dp)
-                        .background(Color.LightGray, RoundedCornerShape(2.dp))
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-                Text("Новая задача", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedTextField(
-                    value = taskName,
-                    onValueChange = { taskName = it },
-                    placeholder = { Text("Что нужно сделать?") },
-                    modifier = Modifier
                         .fillMaxWidth()
-                        .focusRequester(focusRequester),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f)
+                        .height(40.dp) // Высота чувствительной зоны
+                        .draggable(
+                            orientation = Orientation.Vertical,
+                            state = rememberDraggableState { delta -> offsetY += delta },
+                            onDragStopped = {
+                                if (offsetY > 300) { // Чуть уменьшил порог для удобства
+                                    keyboardController?.hide()
+                                    onDismiss()
+                                } else {
+                                    offsetY = 0f
+                                }
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Визуальный индикатор (серая полоска)
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(4.dp)
+                            .background(Color.LightGray, RoundedCornerShape(2.dp))
                     )
-                )
+                }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                // ВНУТРЕННИЙ КОНТЕНТ (с боковыми отступами)
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp)
+                ) {
+                    Text(
+                        text = "Новая задача",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                // КНОПКА ЦЕЛИ И ВСПЛЫВАЮЩИЙ СПИСОК
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Surface(
-                        onClick = {
-                            showGoalSelector = !showGoalSelector
-                            if (showGoalSelector) keyboardController?.hide()
-                        },
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = taskName,
+                        onValueChange = { taskName = it },
+                        placeholder = { Text("Что нужно сделать?") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(42.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.2f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Star, null, modifier = Modifier.size(16.dp), tint = Color.Gray)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(selectedGoal ?: "Цель", fontSize = 14.sp, color = Color.Gray)
-                        }
-                    }
-
-                    // ПЛАВНО ВСПЛЫВАЮЩЕЕ ОКНО
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showGoalSelector,
-                        enter = androidx.compose.animation.expandVertically(
-                            // Используем LinearOutSlowInEasing для максимально естественного "выталкивания"
-                            animationSpec = tween(300, easing = LinearOutSlowInEasing),
-                            expandFrom = Alignment.Top // Контент растет вниз от кнопки
-                        ) + androidx.compose.animation.fadeIn(tween(150)),
-                        exit = androidx.compose.animation.shrinkVertically(
-                            animationSpec = tween(250, easing = LinearOutSlowInEasing),
-                            shrinkTowards = Alignment.Top
-                        ) + androidx.compose.animation.fadeOut(tween(150))
-                    ) {
-                        Column {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 200.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                tonalElevation = 0.dp,
-                                shadowElevation = 0.dp,
-                                border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f))
-                            ) {
-                                Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                                    GoalItem("Без цели", isSelected = selectedGoal == null) {
-                                        selectedGoal = null
-                                        showGoalSelector = false
-                                    }
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(vertical = 4.dp),
-                                        thickness = 0.5.dp,
-                                        color = Color.LightGray.copy(alpha = 0.3f)
+                            .focusRequester(focusRequester),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f)
+                        )
+                    )
+                    // 2. СПИСОК ПОДЗАДАЧ (Теперь здесь, между названием и целью)
+                    if (subTasks.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        // Ограничиваем высоту до ~3 подзадач
+                        Box(modifier = Modifier.heightIn(max = 110.dp)) {
+                            Column(modifier = Modifier.verticalScroll(scrollState)) {
+                                subTasks.forEach { subTask ->
+                                    SubTaskItem(
+                                        subTask = subTask,
+                                        onTextValueChange = { newValue ->
+                                            subTasks = subTasks.map {
+                                                if (it.id == subTask.id) it.copy(textValue = newValue) else it
+                                            }
+                                        },
+                                        onToggle = {
+                                            subTasks = subTasks.map {
+                                                if (it.id == subTask.id) {
+                                                    // Принудительно создаем новую копию TextFieldValue,
+                                                    // чтобы Compose увидел изменение состояния декорации
+                                                    it.copy(
+                                                        isDone = !it.isDone,
+                                                        textValue = it.textValue.copy()
+                                                    )
+                                                } else it
+                                            }
+                                        },
+                                        onDelete = {
+                                            subTasks = subTasks.filter { it.id != subTask.id }
+                                        }
                                     )
-                                    GoalItem("Выучить Kotlin", isSelected = selectedGoal == "Выучить Kotlin") {
-                                        selectedGoal = "Выучить Kotlin"
-                                        showGoalSelector = false
-                                    }
                                 }
                             }
                         }
                     }
-                }
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(20.dp))
+                    // СТРОКА С ЦЕЛЬЮ И КНОПКОЙ ПОДЗАДАЧ
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // БЛОК ЦЕЛИ (Тоньше на 20%, ширина -50%)
+                            Column(modifier = Modifier.fillMaxWidth(0.45f)) {
+                                Surface(
+                                    onClick = {
+                                        showGoalSelector = !showGoalSelector
+                                        keyboardController?.hide()
+                                    },
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .fillMaxWidth(), // Высота 34 вместо 42 (-20%)
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.2f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Star, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(selectedGoal ?: "Цель", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
+                                    }
+                                }
+                            }
 
-                Button(
-                    onClick = {
-                        if (taskName.isNotBlank()) {
-                            keyboardController?.hide()
-                            onTaskAdded(taskName)
+                            // КНОПКА ДОБАВЛЕНИЯ ПОДЗАДАЧ (Иконка разветвления)
+                            IconButton(
+                                onClick = {
+                                    val newNode = SubTask()
+                                    subTasks = subTasks + newNode
+                                    // Плавно скроллим вниз после добавления
+                                    coroutineScope.launch {
+                                        scrollState.animateScrollTo(scrollState.maxValue + 500)
+                                    }
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Добавить подзадачу",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = taskName.isNotBlank()
-                ) {
-                    Text("Запланировать", fontWeight = FontWeight.Bold)
+
+                    // Выпадающий список целей (теперь тоже узкий)
+                    androidx.compose.animation.AnimatedVisibility(visible = showGoalSelector) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth(0.45f)
+                                .padding(top = 4.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f))
+                        ) {
+                            Column {
+                                GoalItem("Без цели", selectedGoal == null) { selectedGoal = null; showGoalSelector = false }
+                                GoalItem("Работа", selectedGoal == "Работа") { selectedGoal = "Работа"; showGoalSelector = false }
+                            }
+                        }
+                    }
+
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Button(
+                        onClick = { if (taskName.isNotBlank()) onTaskAdded(taskName) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        enabled = taskName.isNotBlank()
+                    ) {
+                        Text("Запланировать", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
+        }
+    }
+}
+
+data class SubTask(
+    val id: Long = System.currentTimeMillis() + (0..1000).random(),
+    var textValue: TextFieldValue = TextFieldValue(""), // Используем TextFieldValue
+    var isDone: Boolean = false
+)
+
+@Composable
+fun SubTaskItem(
+    subTask: SubTask,
+    onTextValueChange: (TextFieldValue) -> Unit,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val activeGreen = Color(0xFF4CAF50)
+    val textColor = if (subTask.isDone) activeGreen.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurface
+    val textDecoration = if (subTask.isDone) TextDecoration.LineThrough else TextDecoration.None
+
+    // Создаем FocusRequester для этой подзадачи
+    val focusRequester = remember { FocusRequester() }
+
+    // Авто-фокус при создании новой задачи
+    LaunchedEffect(Unit) {
+        if (subTask.textValue.text.isEmpty() && !subTask.isDone) {
+            focusRequester.requestFocus()
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // ЧЕКБОКС (без изменений, оставляем ваш рабочий код)
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .background(
+                    color = if (subTask.isDone) activeGreen.copy(alpha = 0.1f) else Color.Transparent,
+                    shape = CircleShape
+                )
+                .border(1.5.dp, if (subTask.isDone) activeGreen else Color.LightGray, CircleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onToggle() },
+            contentAlignment = Alignment.Center
+        ) {
+            if (subTask.isDone) {
+                Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp), tint = activeGreen)
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // ПОЛЕ ВВОДА С ФОКУСОМ
+        BasicTextField(
+            value = subTask.textValue,
+            onValueChange = { if (it.text.length <= 100) onTextValueChange(it) },
+            modifier = Modifier
+                .weight(1f)
+                .focusRequester(focusRequester), // ПРИВЯЗЫВАЕМ ФОКУС
+            maxLines = 2,
+            textStyle = TextStyle(
+                fontSize = 15.sp,
+                color = textColor,
+                textDecoration = textDecoration
+            ),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (subTask.textValue.text.isEmpty()) {
+                        Text(
+                            text = "Название подзадачи...",
+                            fontSize = 15.sp,
+                            color = if (subTask.isDone) activeGreen.copy(alpha = 0.4f) else Color.LightGray,
+                            textDecoration = textDecoration
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        )
+
+        IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+            Icon(Icons.Default.Close, null, modifier = Modifier.size(18.dp), tint = Color.Gray.copy(alpha = 0.5f))
         }
     }
 }
@@ -416,7 +575,7 @@ fun DayItem(
     isToday: Boolean,
     onClick: () -> Unit
 ) {
-    val dayName = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale("ru"))
+    val dayName = date.dayOfWeek.getDisplayName(DateTextStyle.SHORT, Locale("ru"))
     val dayNumber = date.dayOfMonth.toString()
 
     val backgroundColor = when {
@@ -480,7 +639,7 @@ fun CustomDatePickerDialog(initialDate: LocalDate,
                 // ВЕРХНЯЯ ЧАСТЬ: Выбранная дата
                 val formatter = remember(tempSelectedDate) {
                     val day = tempSelectedDate.dayOfMonth
-                    val month = tempSelectedDate.month.getDisplayName(TextStyle.SHORT, Locale("ru"))
+                    val month = tempSelectedDate.month.getDisplayName(DateTextStyle.SHORT, Locale("ru"))
                     val year = tempSelectedDate.year
                     "$day $month $year"
                 }
@@ -591,7 +750,7 @@ fun MonthPager(
 
     Column {
         Text(
-            text = currentMonth.month.getDisplayName(TextStyle.FULL, Locale("ru"))
+            text = currentMonth.month.getDisplayName(DateTextStyle.FULL, Locale("ru"))
                 .replaceFirstChar { it.uppercase() } + " ${currentMonth.year}",
             fontWeight = FontWeight.Bold,
             modifier = Modifier.align(Alignment.CenterHorizontally)
