@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearOutSlowInEasing
@@ -664,6 +666,7 @@ fun CalendarGrid(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
+    val haptic = LocalHapticFeedback.current // Достаем менеджер тактильной отдачи
     val years = remember { (2000..2100).toList() }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = years.indexOf(initialYear)
@@ -671,7 +674,7 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
 
     val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
 
-    // Определяем центральный индекс (для кнопки и цвета)
+    // Определяем центральный индекс
     val centerIndex by remember {
         derivedStateOf {
             val layoutInfo = listState.layoutInfo
@@ -686,16 +689,20 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
         }
     }
 
+    // ЛОГИКА ВИБРАЦИИ: Каждый раз, когда centerIndex меняется, происходит "щелчок"
+    LaunchedEffect(centerIndex) {
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+
     val currentYear = years.getOrElse(centerIndex) { initialYear }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .height(200.dp) // Общая высота контейнера
+                .height(200.dp)
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
-            // Рамка выбора (всегда по центру)
             Surface(
                 modifier = Modifier
                     .fillMaxWidth(0.6f)
@@ -709,7 +716,6 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
                 flingBehavior = snapFlingBehavior,
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                // Паддинг 80dp (центрирует элементы при Box 200dp и Item 40dp)
                 contentPadding = PaddingValues(vertical = 80.dp)
             ) {
                 items(years.size) { index ->
@@ -725,38 +731,22 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
                             .height(40.dp)
                             .fillMaxWidth()
                             .graphicsLayer {
-                                // --- НОВАЯ СТАБИЛЬНАЯ ЛОГИКА ---
-                                // 1. Получаем текущие параметры скролла
                                 val firstIdx = listState.firstVisibleItemIndex
                                 val firstOffset = listState.firstVisibleItemScrollOffset
-
-                                // 2. Вычисляем позицию текущего элемента относительно верха вьюпорта (в пикселях)
-                                // itemSize = 40.dp (нужно перевести в px, но здесь можно использовать пропорции)
                                 val itemSizePx = 40.dp.toPx()
                                 val viewportHeightPx = 200.dp.toPx()
                                 val contentPaddingPx = 80.dp.toPx()
 
-                                // Позиция Y центра элемента относительно верха контейнера
-                                val itemTopInViewport =
-                                    (index - firstIdx) * itemSizePx - firstOffset + contentPaddingPx
+                                val itemTopInViewport = (index - firstIdx) * itemSizePx - firstOffset + contentPaddingPx
                                 val itemCenterInViewport = itemTopInViewport + (itemSizePx / 2f)
-
-                                // 3. Расстояние от центра контейнера (100dp)
                                 val viewCenter = viewportHeightPx / 2f
                                 val dist = Math.abs(viewCenter - itemCenterInViewport)
-
-                                // 4. Порог видимости для 5 элементов (~100 пикселей)
                                 val maxDist = itemSizePx * 2.5f
 
                                 if (dist < maxDist) {
                                     val progress = (dist / maxDist).coerceIn(0f, 1f)
-
-                                    // Плавное затухание к краям
                                     alpha = (1f - progress * 0.9f).coerceIn(0f, 1f)
-
-                                    // Изменение размера (1.25 в центре, 0.7 на краях)
-                                    val scaleValue =
-                                        (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
+                                    val scaleValue = (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
                                     scaleX = scaleValue
                                     scaleY = scaleValue
                                 } else {
