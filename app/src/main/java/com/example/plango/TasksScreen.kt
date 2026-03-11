@@ -1,9 +1,13 @@
 package com.example.plango
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,9 +40,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -167,17 +175,16 @@ fun TasksScreen() {
 @Composable
 fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
     var taskName by remember { mutableStateOf("") }
+    var showGoalSelector by remember { mutableStateOf(false) }
+    var selectedGoal by remember { mutableStateOf<String?>(null) }
+
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    // Смещение для свайпа вниз
     var offsetY by remember { mutableFloatStateOf(0f) }
     val animatedOffset by animateFloatAsState(
         targetValue = offsetY,
-        animationSpec = tween(
-            durationMillis = 300,
-            easing = LinearOutSlowInEasing
-        ),
+        animationSpec = tween(durationMillis = 250, easing = LinearOutSlowInEasing),
         label = "drag_return"
     )
 
@@ -189,32 +196,33 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .imePadding(), // Окно прилипает к клавиатуре
+            .imePadding()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onDismiss() },
         contentAlignment = Alignment.BottomCenter
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer { translationY = animatedOffset.coerceAtLeast(0f) }
-                // Реализация DRAG HANDLER
                 .draggable(
                     orientation = Orientation.Vertical,
-                    state = rememberDraggableState { delta ->
-                        offsetY += delta
-                    },
+                    state = rememberDraggableState { delta -> offsetY += delta },
                     onDragStopped = {
                         if (offsetY > 350) {
                             keyboardController?.hide()
                             onDismiss()
                         } else {
-                            offsetY = 0f // Возвращаем на место
+                            offsetY = 0f
                         }
                     }
                 )
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
-                ) { }, // Блокируем клики под окно
+                ) { showGoalSelector = false },
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 8.dp
@@ -223,8 +231,11 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
                     .padding(top = 12.dp, bottom = 24.dp)
+                // УБРАЛИ animateContentSize здесь, так как он создает задержку.
+                // Теперь окно будет расширяться ровно с той скоростью,
+                // с которой AnimatedVisibility раскрывает список.
             ) {
-                // Визуальная полоска (Drag Handle)
+                // Хендлер для свайпа
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
@@ -234,13 +245,7 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    text = "Новая задача",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-
+                Text("Новая задача", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 OutlinedTextField(
@@ -254,9 +259,80 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = Color.LightGray
+                        unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f)
                     )
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // КНОПКА ЦЕЛИ И ВСПЛЫВАЮЩИЙ СПИСОК
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        onClick = {
+                            showGoalSelector = !showGoalSelector
+                            if (showGoalSelector) keyboardController?.hide()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.2f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Star, null, modifier = Modifier.size(16.dp), tint = Color.Gray)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(selectedGoal ?: "Цель", fontSize = 14.sp, color = Color.Gray)
+                        }
+                    }
+
+                    // ПЛАВНО ВСПЛЫВАЮЩЕЕ ОКНО
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showGoalSelector,
+                        enter = androidx.compose.animation.expandVertically(
+                            // Используем LinearOutSlowInEasing для максимально естественного "выталкивания"
+                            animationSpec = tween(300, easing = LinearOutSlowInEasing),
+                            expandFrom = Alignment.Top // Контент растет вниз от кнопки
+                        ) + androidx.compose.animation.fadeIn(tween(150)),
+                        exit = androidx.compose.animation.shrinkVertically(
+                            animationSpec = tween(250, easing = LinearOutSlowInEasing),
+                            shrinkTowards = Alignment.Top
+                        ) + androidx.compose.animation.fadeOut(tween(150))
+                    ) {
+                        Column {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 200.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                tonalElevation = 0.dp,
+                                shadowElevation = 0.dp,
+                                border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f))
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                                    GoalItem("Без цели", isSelected = selectedGoal == null) {
+                                        selectedGoal = null
+                                        showGoalSelector = false
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 4.dp),
+                                        thickness = 0.5.dp,
+                                        color = Color.LightGray.copy(alpha = 0.3f)
+                                    )
+                                    GoalItem("Выучить Kotlin", isSelected = selectedGoal == "Выучить Kotlin") {
+                                        selectedGoal = "Выучить Kotlin"
+                                        showGoalSelector = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -273,10 +349,28 @@ fun AddTaskSheet(onDismiss: () -> Unit, onTaskAdded: (String) -> Unit) {
                     shape = RoundedCornerShape(12.dp),
                     enabled = taskName.isNotBlank()
                 ) {
-                    Text("СОХРАНИТЬ", fontWeight = FontWeight.Bold)
+                    Text("Запланировать", fontWeight = FontWeight.Bold)
                 }
             }
         }
+    }
+}
+
+// Вспомогательный компонент для элемента списка целей
+@Composable
+fun GoalItem(text: String, isSelected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = text,
+            fontSize = 15.sp,
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+        )
     }
 }
 
@@ -652,7 +746,8 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
                                 val viewportHeightPx = 200.dp.toPx()
                                 val contentPaddingPx = 80.dp.toPx()
 
-                                val itemTopInViewport = (index - firstIdx) * itemSizePx - firstOffset + contentPaddingPx
+                                val itemTopInViewport =
+                                    (index - firstIdx) * itemSizePx - firstOffset + contentPaddingPx
                                 val itemCenterInViewport = itemTopInViewport + (itemSizePx / 2f)
                                 val viewCenter = viewportHeightPx / 2f
                                 val dist = Math.abs(viewCenter - itemCenterInViewport)
@@ -661,7 +756,8 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
                                 if (dist < maxDist) {
                                     val progress = (dist / maxDist).coerceIn(0f, 1f)
                                     alpha = (1f - progress * 0.9f).coerceIn(0f, 1f)
-                                    val scaleValue = (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
+                                    val scaleValue =
+                                        (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
                                     scaleX = scaleValue
                                     scaleY = scaleValue
                                 } else {
