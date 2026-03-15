@@ -24,11 +24,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.core.view.WindowCompat
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+//        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             MaterialTheme {
                 MainScreen()
@@ -88,41 +90,15 @@ fun MainScreen() {
     // ВЫНОСИМ ОКНО ЗА ПРЕДЕЛЫ SCAFFOLD (чтобы перекрыть NavigationBar и FAB)
     // Используем Box, который занимает ВЕСЬ экран поверх Scaffold
     if (showAddTaskSheet) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // 1. Затемнение фона
-            var animateScrim by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { animateScrim = true }
-
-            AnimatedVisibility(
-                visible = animateScrim,
-                enter = fadeIn(tween(500)),
-                exit = fadeOut(tween(500))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            animateScrim = false
-                            showAddTaskSheet = false
-                        }
-                )
+        AddTaskDialog(
+            onDismiss = {
+                showAddTaskSheet = false
+            },
+            onTaskAdded = {
+                // Здесь обработайте добавление задачи
+                showAddTaskSheet = false
             }
-
-            // 2. Окно задачи
-            AddTaskSheet(
-                onDismiss = {
-                    animateScrim = false
-                    showAddTaskSheet = false
-                },
-                onTaskAdded = {
-                    showAddTaskSheet = false
-                }
-            )
-        }
+        )
     }
 }
 

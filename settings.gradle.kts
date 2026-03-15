@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "PlanGo"
 include(":app")
+include(":app:baselineprofile")
