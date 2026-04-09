@@ -1,5 +1,6 @@
 package com.example.plango
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 
@@ -94,7 +95,6 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.TextStyle as DateTextStyle
 import java.util.Locale
-
 
 @Composable
 fun TasksScreen() {
@@ -198,27 +198,12 @@ fun AddTaskDialog(
             decorFitsSystemWindows = false
         )
     ) {
-        // Основной контейнер диалога с imePadding() для поднятия при появлении клавиатуры
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()   // ← поднимает содержимое синхронно с клавиатурой
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    onDismiss()
-                },
+                .imePadding(),
             contentAlignment = Alignment.BottomCenter
         ) {
-            // Фон затемнения (поднимается вместе с Box, закрывая весь экран)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f))
-            )
-
-            // Само окно ввода
             AddTaskSheetContent(
                 onDismiss = onDismiss,
                 onTaskAdded = onTaskAdded
@@ -233,30 +218,60 @@ fun AddTaskSheetContent(
     onDismiss: () -> Unit,
     onTaskAdded: (String) -> Unit
 ) {
-    var taskName by remember { mutableStateOf("") }
-    val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
 
+    var taskName by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    // ── Появление sheet: ждём первого кадра с клавиатурой ────────────────────
     val imeBottom = WindowInsets.ime.getBottom(density)
-    val isKeyboardVisible = imeBottom > 0
-
-    // Флаг, что клавиатура уже появлялась (чтобы не скрывать окно при её закрытии)
     var hasKeyboardShown by remember { mutableStateOf(false) }
-    if (isKeyboardVisible) {
-        hasKeyboardShown = true
+    if (imeBottom > 0) hasKeyboardShown = true
+
+    // ── Флаг активного закрытия (защита от двойного вызова) ──────────────────
+    var isDismissing by remember { mutableStateOf(false) }
+
+    // ── Единый Animatable для Y-смещения sheet ────────────────────────────────
+    // Хранит текущую позицию между drag и exit-анимацией — без прыжков
+    var AnimatabletranslationY = remember { Animatable(0f) }
+
+    // ── Закрытие: анимируем sheet от ТЕКУЩЕЙ позиции до +1200f ───────────────
+    // Клавиатура скрывается одновременно с запуском анимации
+    fun triggerDismiss(pendingTask: String? = null) {
+        if (isDismissing) return
+        isDismissing = true
+        keyboardController?.hide()
+        coroutineScope.launch {
+            AnimatabletranslationY.animateTo(
+                targetValue = 1200f,
+                // FastOutLinearInEasing: ускорение в начале — эффект "падения вниз"
+                animationSpec = tween(durationMillis = 260, easing = FastOutLinearInEasing)
+            )
+            // После завершения анимации: добавляем задачу (если есть) и закрываем
+            pendingTask?.let { onTaskAdded(it) }
+            onDismiss()
+        }
     }
 
-    // Анимация прозрачности: появляемся при первом показе клавиатуры, но не исчезаем при её скрытии
-    val targetAlpha = if (hasKeyboardShown) 1f else 0f
-    val animatedAlpha by animateFloatAsState(
-        targetValue = targetAlpha,
-        animationSpec = tween(durationMillis = 150),
-        label = "alpha"
+    // ── Scrim: появляется с клавиатурой, тает при закрытии ───────────────────
+    val scrimAlpha by animateFloatAsState(
+        targetValue = when {
+            isDismissing -> 0f
+            hasKeyboardShown -> 0.45f
+            else -> 0f
+        },
+        animationSpec = tween(durationMillis = 220),
+        label = "scrim_alpha"
     )
 
-    // drag-to-dismiss
-    var dragOffset by remember { mutableFloatStateOf(0f) }
+    // ── Sheet alpha: появляется после первого кадра клавиатуры ───────────────
+    val sheetAlpha by animateFloatAsState(
+        targetValue = if (hasKeyboardShown && !isDismissing) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "sheet_alpha"
+    )
 
     LaunchedEffect(Unit) {
         delay(16)
@@ -264,17 +279,30 @@ fun AddTaskSheetContent(
         keyboardController?.show()
     }
 
-    Surface(
+    // ── Scrim ─────────────────────────────────────────────────────────────────
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .alpha(animatedAlpha)
-            .graphicsLayer {
-                translationY = dragOffset.coerceAtLeast(0f)
-            }
+            .fillMaxSize()
+            .alpha(scrimAlpha)
+            .background(Color.Black)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
-            ) { /* предотвращаем всплытие клика */ },
+            ) { triggerDismiss() }
+    )
+
+    // ── Sheet ─────────────────────────────────────────────────────────────────
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(sheetAlpha)
+            // graphicsLayer → RenderThread: translationY не вызывает recomposition
+            .graphicsLayer { translationY = AnimatabletranslationY.value }
+            .semantics { testTag = "add_task_sheet" }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { /* поглощаем клик */ },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 8.dp
@@ -286,7 +314,7 @@ fun AddTaskSheetContent(
         ) {
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Зона свайпа
+            // ── Drag handle ──────────────────────────────────────────────────
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -294,14 +322,31 @@ fun AddTaskSheetContent(
                     .draggable(
                         orientation = Orientation.Vertical,
                         state = rememberDraggableState { delta ->
-                            dragOffset = (dragOffset + delta).coerceAtLeast(0f)
+                            if (!isDismissing) {
+                                coroutineScope.launch {
+                                    // snapTo: мгновенно следует за пальцем без инерции
+                                    AnimatabletranslationY.snapTo(
+                                        (AnimatabletranslationY.value + delta).coerceAtLeast(0f)
+                                    )
+                                }
+                            }
                         },
-                        onDragStopped = {
-                            if (dragOffset > 200f) {
-                                keyboardController?.hide()
-                                onDismiss()
+                        onDragStopped = { velocity ->
+                            if (isDismissing) return@draggable
+                            if (AnimatabletranslationY.value > 800f || velocity > 5000f) {
+                                // Порог пройден или быстрый свайп — закрываем с текущей позиции
+                                triggerDismiss()
                             } else {
-                                dragOffset = 0f
+                                // Возврат пружиной из текущей позиции в 0
+                                coroutineScope.launch {
+                                    AnimatabletranslationY.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    )
+                                }
                             }
                         }
                     ),
@@ -314,6 +359,7 @@ fun AddTaskSheetContent(
                         .background(Color.LightGray, RoundedCornerShape(2.dp))
                 )
             }
+            // ────────────────────────────────────────────────────────────────
 
             Column(modifier = Modifier.padding(horizontal = 15.dp)) {
                 Spacer(modifier = Modifier.height(16.dp))
@@ -326,18 +372,18 @@ fun AddTaskSheetContent(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .focusRequester(focusRequester),
+                        .focusRequester(focusRequester)
+                        .semantics { testTag = "task_name_input" },
                     shape = RoundedCornerShape(16.dp),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                        unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f),
+                        unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f)
                     )
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // ЗАГЛУШКА: Матрица приоритетов
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -348,55 +394,33 @@ fun AddTaskSheetContent(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "Матрица приоритетов",
-                        color = Color.Gray,
-                        fontSize = 13.sp
-                    )
+                    Text("Матрица приоритетов", color = Color.Gray, fontSize = 13.sp)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // ЗАГЛУШКА: Цель + Напоминание
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Surface(
-                        modifier = Modifier
-                            .weight(0.45f)
-                            .height(34.dp),
+                        modifier = Modifier.weight(0.45f).height(34.dp),
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                     ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("Выбрать цель", color = Color.Gray, fontSize = 12.sp)
                         }
                     }
 
                     Surface(
-                        modifier = Modifier
-                            .weight(0.55f)
-                            .height(34.dp),
+                        modifier = Modifier.weight(0.55f).height(34.dp),
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                        )
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                     ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            Text(
-                                "Напоминание и сроки",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 11.sp
-                            )
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Напоминание и сроки", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
                         }
                     }
                 }
@@ -404,10 +428,12 @@ fun AddTaskSheetContent(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 Button(
-                    onClick = { if (taskName.isNotBlank()) onTaskAdded(taskName) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
+                    // taskName передаётся в triggerDismiss — onTaskAdded вызовется
+                    // после завершения exit-анимации, а не мгновенно
+                    onClick = { if (taskName.isNotBlank()) triggerDismiss(pendingTask = taskName) },
+                    modifier = Modifier.fillMaxWidth()
+                                        .height(52.dp)
+                                        .semantics { testTag = "add_task_button" },
                     shape = RoundedCornerShape(12.dp),
                     enabled = taskName.isNotBlank()
                 ) {

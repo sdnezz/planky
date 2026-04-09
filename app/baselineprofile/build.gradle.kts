@@ -13,8 +13,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        }
     }
 
     defaultConfig {
@@ -38,5 +40,5 @@ dependencies {
     implementation(libs.androidx.junit)
     implementation(libs.androidx.espresso.core)
     implementation(libs.androidx.uiautomator)
-    implementation(libs.androidx.benchmark.macro.junit4)
+    implementation(libs.androidx.benchmark.macro)
 }

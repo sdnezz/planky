@@ -24,6 +24,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.core.view.WindowCompat
 
 class MainActivity : ComponentActivity() {
@@ -65,7 +67,8 @@ fun MainScreen() {
                 FloatingActionButton(
                     onClick = { showAddTaskSheet = true },
                     containerColor = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.semantics { testTag = "add_task_fab" }
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
                 }
