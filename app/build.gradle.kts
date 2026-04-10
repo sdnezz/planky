@@ -19,8 +19,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+//    signingConfigs {
+//        create("release") {
+//            // Используем дебажный ключ, чтобы просто запустить
+//            storeFile = file("debug.keystore")
+//            storePassword = "android"
+//            keyAlias = "androiddebugkey"
+//            keyPassword = "android"
+//        }
+
     buildTypes {
         release {
+//            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -59,6 +69,8 @@ dependencies {
     implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.benchmark.macro)
     implementation(libs.androidx.compose.ui.util)
+    implementation(libs.androidx.compose.animation)
+    implementation(libs.androidx.ui)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -1,12 +1,34 @@
 package com.example.plango
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -37,15 +59,24 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.twotone.DateRange
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,10 +89,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,6 +110,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -90,6 +126,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Popup
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -219,26 +256,39 @@ fun AddTaskSheetContent(
     onTaskAdded: (String) -> Unit
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
-    val density = LocalDensity.current
+//    val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
 
     var taskName by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
+
+    // Подзадачи
+    var subTasks by remember { mutableStateOf(listOf<SubTask>()) }
+    val scrollState = rememberScrollState()
+
+    // Важность / Срочность
+    var isImportant by remember { mutableStateOf(false) }
+    var isUrgent by remember { mutableStateOf(false) }
+
+    // Сложность (1..5, 0 – не выбрано)
+    var difficulty by remember { mutableIntStateOf(0) }
+
+    // Цель
+    var selectedGoal by remember { mutableStateOf<String?>(null) }
+    var showGoalSelector by remember { mutableStateOf(false) }
+
+    // Для позиционирования Popup
+    val density = LocalDensity.current
+    var goalButtonBounds by remember { mutableStateOf<Rect?>(null) }
 
     // ── Появление sheet: ждём первого кадра с клавиатурой ────────────────────
     val imeBottom = WindowInsets.ime.getBottom(density)
     var hasKeyboardShown by remember { mutableStateOf(false) }
     if (imeBottom > 0) hasKeyboardShown = true
 
-    // ── Флаг активного закрытия (защита от двойного вызова) ──────────────────
     var isDismissing by remember { mutableStateOf(false) }
-
-    // ── Единый Animatable для Y-смещения sheet ────────────────────────────────
-    // Хранит текущую позицию между drag и exit-анимацией — без прыжков
     var AnimatabletranslationY = remember { Animatable(0f) }
 
-    // ── Закрытие: анимируем sheet от ТЕКУЩЕЙ позиции до +1200f ───────────────
-    // Клавиатура скрывается одновременно с запуском анимации
     fun triggerDismiss(pendingTask: String? = null) {
         if (isDismissing) return
         isDismissing = true
@@ -246,30 +296,26 @@ fun AddTaskSheetContent(
         coroutineScope.launch {
             AnimatabletranslationY.animateTo(
                 targetValue = 1200f,
-                // FastOutLinearInEasing: ускорение в начале — эффект "падения вниз"
                 animationSpec = tween(durationMillis = 260, easing = FastOutLinearInEasing)
             )
-            // После завершения анимации: добавляем задачу (если есть) и закрываем
             pendingTask?.let { onTaskAdded(it) }
             onDismiss()
         }
     }
 
-    // ── Scrim: появляется с клавиатурой, тает при закрытии ───────────────────
     val scrimAlpha by animateFloatAsState(
         targetValue = when {
             isDismissing -> 0f
             hasKeyboardShown -> 0.45f
             else -> 0f
         },
-        animationSpec = tween(durationMillis = 220),
+        animationSpec = tween(220),
         label = "scrim_alpha"
     )
 
-    // ── Sheet alpha: появляется после первого кадра клавиатуры ───────────────
     val sheetAlpha by animateFloatAsState(
         targetValue = if (hasKeyboardShown && !isDismissing) 1f else 0f,
-        animationSpec = tween(durationMillis = 180),
+        animationSpec = tween(180),
         label = "sheet_alpha"
     )
 
@@ -279,7 +325,13 @@ fun AddTaskSheetContent(
         keyboardController?.show()
     }
 
-    // ── Scrim ─────────────────────────────────────────────────────────────────
+    LaunchedEffect(showGoalSelector) {
+        if (showGoalSelector) {
+            keyboardController?.hide()
+        }
+    }
+
+    // Scrim
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -291,18 +343,19 @@ fun AddTaskSheetContent(
             ) { triggerDismiss() }
     )
 
-    // ── Sheet ─────────────────────────────────────────────────────────────────
+    // Основное окно
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(sheetAlpha)
-            // graphicsLayer → RenderThread: translationY не вызывает recomposition
             .graphicsLayer { translationY = AnimatabletranslationY.value }
             .semantics { testTag = "add_task_sheet" }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
-            ) { /* поглощаем клик */ },
+            ) {
+                showGoalSelector = false
+            },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 8.dp
@@ -314,7 +367,7 @@ fun AddTaskSheetContent(
         ) {
             Spacer(modifier = Modifier.height(10.dp))
 
-            // ── Drag handle ──────────────────────────────────────────────────
+            // Drag handle
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -324,7 +377,6 @@ fun AddTaskSheetContent(
                         state = rememberDraggableState { delta ->
                             if (!isDismissing) {
                                 coroutineScope.launch {
-                                    // snapTo: мгновенно следует за пальцем без инерции
                                     AnimatabletranslationY.snapTo(
                                         (AnimatabletranslationY.value + delta).coerceAtLeast(0f)
                                     )
@@ -334,10 +386,8 @@ fun AddTaskSheetContent(
                         onDragStopped = { velocity ->
                             if (isDismissing) return@draggable
                             if (AnimatabletranslationY.value > 800f || velocity > 5000f) {
-                                // Порог пройден или быстрый свайп — закрываем с текущей позиции
                                 triggerDismiss()
                             } else {
-                                // Возврат пружиной из текущей позиции в 0
                                 coroutineScope.launch {
                                     AnimatabletranslationY.animateTo(
                                         targetValue = 0f,
@@ -359,91 +409,287 @@ fun AddTaskSheetContent(
                         .background(Color.LightGray, RoundedCornerShape(2.dp))
                 )
             }
-            // ────────────────────────────────────────────────────────────────
 
             Column(modifier = Modifier.padding(horizontal = 15.dp)) {
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // Поле ввода задачи
                 OutlinedTextField(
                     value = taskName,
                     onValueChange = { taskName = it },
-                    placeholder = {
-                        Text("Новая задача...", fontSize = 16.sp, color = Color.Gray)
-                    },
+                    placeholder = { Text("Новая задача...", fontSize = 16.sp, color = Color.Gray) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester)
                         .semantics { testTag = "task_name_input" },
                     shape = RoundedCornerShape(16.dp),
                     singleLine = true,
+                    leadingIcon = {
+                        Surface(
+                            onClick = { /* TODO */ },
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .size(38.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = {
+                                subTasks = subTasks + SubTask()
+                                coroutineScope.launch {
+                                    delay(50)
+                                    scrollState.animateScrollTo(scrollState.maxValue + 500)
+                                }
+                            },
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                "Добавить подзадачу",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                         unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f)
                     )
                 )
 
+                // Список подзадач
+                if (subTasks.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.heightIn(max = 110.dp)) {
+                        Column(modifier = Modifier.verticalScroll(scrollState)) {
+                            subTasks.forEach { subTask ->
+                                key(subTask.id) {
+                                    var isVisible by remember { mutableStateOf(false) }
+                                    LaunchedEffect(Unit) { isVisible = true }
+                                    AnimatedVisibility(
+                                        visible = isVisible,
+                                        enter = expandVertically(tween(300)) + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        SubTaskItem(
+                                            subTask = subTask,
+                                            onTextValueChange = { newValue ->
+                                                subTasks = subTasks.map {
+                                                    if (it.id == subTask.id) it.copy(textValue = newValue) else it
+                                                }
+                                            },
+                                            onToggle = {
+                                                subTasks = subTasks.map {
+                                                    if (it.id == subTask.id) it.copy(isDone = !it.isDone) else it
+                                                }
+                                            },
+                                            onDelete = {
+                                                isVisible = false
+                                                coroutineScope.launch {
+                                                    delay(200)
+                                                    subTasks = subTasks.filter { it.id != subTask.id }
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            RoundedCornerShape(12.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Матрица приоритетов", color = Color.Gray, fontSize = 13.sp)
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
+                // Блок Важность / Срочность + Сложность и остальные элементы
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Surface(
-                        modifier = Modifier.weight(0.45f).height(34.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    // Левая колонка: кнопки "Важно" и "Срочно"
+                    Column(
+                        modifier = Modifier.width(80.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Выбрать цель", color = Color.Gray, fontSize = 12.sp)
-                        }
+                        FilterChip(
+                            selected = isImportant,
+                            onClick = { isImportant = !isImportant },
+                            label = { Text("Важно", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFFFA726)
+                            )
+                        )
+                        FilterChip(
+                            selected = isUrgent,
+                            onClick = { isUrgent = !isUrgent },
+                            label = { Text("Срочно", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFEF5350)
+                            )
+                        )
                     }
 
-                    Surface(
-                        modifier = Modifier.weight(0.55f).height(34.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    // Правая колонка: всё остальное
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Напоминание и сроки", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
+                        // Шкала сложности с подписями над квадратиками
+                        Column {
+                            // Подписи "Легко" и "Сложно" над шкалой
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Легко", fontSize = 10.sp, color = Color.Gray)
+                                Text("Сложно", fontSize = 10.sp, color = Color.Gray)
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            // Квадратики сложности
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                for (level in 1..5) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .background(
+                                                if (level <= difficulty) MaterialTheme.colorScheme.primary
+                                                else Color.LightGray.copy(alpha = 0.3f),
+                                                RoundedCornerShape(6.dp)
+                                            )
+                                            .clickable { difficulty = level }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Нижний ряд: Цель, Напоминания, Кнопка "Запланировать"
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Кнопка выбора цели (с Popup)
+                            Box(modifier = Modifier.weight(1f)) {
+                                val goalText = selectedGoal ?: "Выбрать цель"
+                                val displayGoalText = if (goalText.length > 15) goalText.take(15) + "…" else goalText
+
+                                Surface(
+                                    onClick = { showGoalSelector = true },
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .fillMaxWidth()
+                                        .onGloballyPositioned { goalButtonBounds = it.boundsInWindow() },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.2f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Star, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(displayGoalText, fontSize = 12.sp, color = Color.Gray, maxLines = 1)
+                                    }
+                                }
+
+                                if (showGoalSelector && goalButtonBounds != null) {
+                                    Popup(
+                                        alignment = Alignment.TopCenter,
+                                        offset = IntOffset(0, -goalButtonBounds!!.height.toInt() - 8),
+                                        onDismissRequest = { showGoalSelector = false },
+                                        properties = PopupProperties(focusable = true)
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            shadowElevation = 8.dp,
+                                            border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f))
+                                        ) {
+                                            Column(modifier = Modifier.width(160.dp).padding(4.dp)) {
+                                                GoalItem("Без цели", selectedGoal == null) {
+                                                    selectedGoal = null
+                                                    showGoalSelector = false
+                                                }
+                                                GoalItem("Работа", selectedGoal == "Работа") {
+                                                    selectedGoal = "Работа"
+                                                    showGoalSelector = false
+                                                }
+                                                GoalItem("Личное", selectedGoal == "Личное") {
+                                                    selectedGoal = "Личное"
+                                                    showGoalSelector = false
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Кнопка напоминаний (только иконка)
+                            Surface(
+                                onClick = { /* TODO */ },
+                                modifier = Modifier.size(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.TwoTone.DateRange,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            // Кнопка "Запланировать" (стрелка)
+                            Surface(
+                                onClick = { if (taskName.isNotBlank()) triggerDismiss(taskName) },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .semantics { testTag = "add_task_button" },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (taskName.isNotBlank())
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                                enabled = taskName.isNotBlank()
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.ArrowForward,
+                                        "Запланировать",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
                         }
                     }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Button(
-                    // taskName передаётся в triggerDismiss — onTaskAdded вызовется
-                    // после завершения exit-анимации, а не мгновенно
-                    onClick = { if (taskName.isNotBlank()) triggerDismiss(pendingTask = taskName) },
-                    modifier = Modifier.fillMaxWidth()
-                                        .height(52.dp)
-                                        .semantics { testTag = "add_task_button" },
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = taskName.isNotBlank()
-                ) {
-                    Text("Запланировать", fontWeight = FontWeight.Bold)
                 }
             }
         }
     }
 }
 
+@Stable
 data class SubTask(
     val id: Long = System.currentTimeMillis() + (0..1000).random(),
     var textValue: TextFieldValue = TextFieldValue(""), // Используем TextFieldValue

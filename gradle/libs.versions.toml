@@ -17,6 +17,8 @@ benchmark-macro = "1.4.1"
 baselineprofile = "1.4.1"
 profileinstaller = "1.4.1"
 uiUtil = "1.10.6"
+animation = "1.10.6"
+ui = "1.10.6"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -42,6 +44,8 @@ androidx-benchmark-macro = { group = "androidx.benchmark", name = "benchmark-mac
 androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 androidx-compose-ui-util = { group = "androidx.compose.ui", name = "ui-util", version.ref = "uiUtil" }
 compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation", version.ref = "animation" }
+androidx-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "ui" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
