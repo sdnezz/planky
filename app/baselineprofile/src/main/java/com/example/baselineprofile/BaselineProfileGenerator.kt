@@ -25,60 +25,51 @@ class BaselineProfileGenerator {
             pressHome()
             startActivityAndWait()
 
-            // Ждём загрузки UI и нажимаем "Задачи"
+            // Ждём появления вкладки "Задачи" и кликаем
             val tasksTab = device.wait(Until.findObject(By.text("Задачи")), 5000)
             tasksTab?.click()
             device.waitForIdle()
 
-            // Основной цикл открытия окна добавления
+            // Повторяем сценарий 3 раза для лучшего покрытия
             repeat(3) {
-                // Ищем FAB по contentDescription
+                // Открываем FAB
                 val fab = device.wait(Until.findObject(By.desc("Добавить")), 3000)
                 fab?.click()
 
-                // Ждём появления текстового поля с placeholder "Новая задача..."
+                // Ждём появления окна (по placeholder поля ввода)
                 val inputField = device.wait(
                     Until.findObject(By.text("Новая задача...")),
                     3000
                 )
-                // Вводим текст
                 inputField?.click()
-                inputField?.text = "Тест $it"
+                device.waitForIdle()  // даём клавиатуре открыться
+
+                // Вводим текст
+                inputField?.text = "Тест"
                 device.waitForIdle()
 
-                // Нажимаем кнопку "Запланировать" (ищем по тексту)
+                // Ждём, пока кнопка "Запланировать" станет доступной
                 val addButton = device.wait(
-                    Until.findObject(By.text("Запланировать")),
-                    2000
+                    Until.findObject(By.text("Запланировать").enabled(true)),
+                    3000
                 )
                 addButton?.click()
                 device.waitForIdle()
             }
 
-            // Дополнительно: проверяем закрытие свайпом
+            // Дополнительно: свайп для закрытия
             val fab = device.wait(Until.findObject(By.desc("Добавить")), 3000)
             fab?.click()
             device.wait(Until.findObject(By.text("Новая задача...")), 3000)
 
-            // Свайп вниз от середины экрана
-            val displayHeight = device.displayHeight
             val displayWidth = device.displayWidth
+            val displayHeight = device.displayHeight
             device.swipe(
                 displayWidth / 2, displayHeight / 3,
                 displayWidth / 2, displayHeight,
                 20
             )
             device.waitForIdle()
-
-            // Прокрутка календаря
-            repeat(2) {
-                device.swipe(
-                    (displayWidth * 0.8).toInt(), (displayHeight * 0.3).toInt(),
-                    (displayWidth * 0.2).toInt(), (displayHeight * 0.3).toInt(),
-                    15
-                )
-                device.waitForIdle()
-            }
         }
     }
 }
