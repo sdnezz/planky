@@ -325,12 +325,6 @@ fun AddTaskSheetContent(
         keyboardController?.show()
     }
 
-    LaunchedEffect(showGoalSelector) {
-        if (showGoalSelector) {
-            keyboardController?.hide()
-        }
-    }
-
     // Scrim
     Box(
         modifier = Modifier
@@ -371,7 +365,7 @@ fun AddTaskSheetContent(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(20.dp)
+                    .height(10.dp)
                     .draggable(
                         orientation = Orientation.Vertical,
                         state = rememberDraggableState { delta ->
@@ -385,7 +379,7 @@ fun AddTaskSheetContent(
                         },
                         onDragStopped = { velocity ->
                             if (isDismissing) return@draggable
-                            if (AnimatabletranslationY.value > 800f || velocity > 5000f) {
+                            if (AnimatabletranslationY.value > 600f || velocity > 5000f) {
                                 triggerDismiss()
                             } else {
                                 coroutineScope.launch {
@@ -497,8 +491,13 @@ fun AddTaskSheetContent(
                                             onDelete = {
                                                 isVisible = false
                                                 coroutineScope.launch {
-                                                    delay(200)
+                                                    delay(200)   // ждём завершения анимации исчезновения
                                                     subTasks = subTasks.filter { it.id != subTask.id }
+                                                    if (imeBottom>0) {
+                                                        // Возвращаем фокус основному полю, только если клавиатура была открыта
+                                                        focusRequester.requestFocus()
+                                                        keyboardController?.show()
+                                                    }
                                                 }
                                             }
                                         )
@@ -514,27 +513,28 @@ fun AddTaskSheetContent(
                 // Блок Важность / Срочность + Сложность и остальные элементы
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Левая колонка: кнопки "Важно" и "Срочно"
                     Column(
                         modifier = Modifier.width(80.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.Top,   // прижимаем к верху
                     ) {
                         FilterChip(
                             selected = isImportant,
                             onClick = { isImportant = !isImportant },
                             label = { Text("Важно", fontSize = 12.sp) },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().height(43.dp),
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color(0xFFFFA726)
                             )
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
                         FilterChip(
                             selected = isUrgent,
                             onClick = { isUrgent = !isUrgent },
                             label = { Text("Срочно", fontSize = 12.sp) },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().height(43.dp),
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color(0xFFEF5350)
                             )
@@ -544,85 +544,108 @@ fun AddTaskSheetContent(
                     // Правая колонка: всё остальное
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.Top
                     ) {
-                        // Шкала сложности с подписями над квадратиками
-                        Column {
-                            // Подписи "Легко" и "Сложно" над шкалой
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Легко", fontSize = 10.sp, color = Color.Gray)
-                                Text("Сложно", fontSize = 10.sp, color = Color.Gray)
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            // Квадратики сложности
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                for (level in 1..5) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .background(
-                                                if (level <= difficulty) MaterialTheme.colorScheme.primary
-                                                else Color.LightGray.copy(alpha = 0.3f),
-                                                RoundedCornerShape(6.dp)
-                                            )
-                                            .clickable { difficulty = level }
-                                    )
-                                }
-                            }
-                        }
-
-                        // Нижний ряд: Цель, Напоминания, Кнопка "Запланировать"
+                        // Первая строка: шкала сложности + кнопка цели
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().height(43.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Кнопка выбора цели (с Popup)
+                            // Блок шкалы сложности (подписи над квадратиками)
+                            Column(
+                                modifier = Modifier.weight(1.5f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Легко", fontSize = 10.sp, color = Color.Gray)
+                                    Text("Сложно", fontSize = 10.sp, color = Color.Gray)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    for (level in 1..5) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)   // квадратики побольше
+                                                .background(
+                                                    if (level <= difficulty) MaterialTheme.colorScheme.primary
+                                                    else Color.LightGray.copy(alpha = 0.3f),
+                                                    RoundedCornerShape(6.dp)
+                                                )
+                                                .clickable { difficulty = level }
+                                        )
+                                        if (level < 5) Spacer(modifier = Modifier.width(1.dp))
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            // Кнопка цели (занимает оставшееся место)
                             Box(modifier = Modifier.weight(1f)) {
-                                val goalText = selectedGoal ?: "Выбрать цель"
-                                val displayGoalText = if (goalText.length > 15) goalText.take(15) + "…" else goalText
+                                val goalText = selectedGoal ?: "Цель"
+                                val displayGoalText =
+                                    if (goalText.length > 15) goalText.take(15) + "…" else goalText
 
                                 Surface(
                                     onClick = { showGoalSelector = true },
                                     modifier = Modifier
-                                        .height(34.dp)
+                                        .height(43.dp)
                                         .fillMaxWidth()
-                                        .onGloballyPositioned { goalButtonBounds = it.boundsInWindow() },
-                                    shape = RoundedCornerShape(8.dp),
+                                        .onGloballyPositioned {
+                                            goalButtonBounds = it.boundsInWindow()
+                                        },
+                                    shape = RoundedCornerShape(12.dp),
                                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                                     border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.2f))
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Default.Star, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(displayGoalText, fontSize = 12.sp, color = Color.Gray, maxLines = 1)
+                                        Icon(
+                                            Icons.Default.Star,
+                                            null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = Color.Gray
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            displayGoalText,
+                                            fontSize = 12.sp,
+                                            color = Color.Gray,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
 
                                 if (showGoalSelector && goalButtonBounds != null) {
                                     Popup(
                                         alignment = Alignment.TopCenter,
-                                        offset = IntOffset(0, -goalButtonBounds!!.height.toInt() - 8),
+                                        offset = IntOffset(10, -goalButtonBounds!!.height.toInt() - 8),
                                         onDismissRequest = { showGoalSelector = false },
-                                        properties = PopupProperties(focusable = true)
+                                        properties = PopupProperties(focusable = false)   // ← отключаем захват фокуса
                                     ) {
+                                        // После открытия попапа возвращаем фокус основному полю,
+                                        // но только если клавиатура была видна до этого
+                                        LaunchedEffect(Unit) {
+                                            if (imeBottom > 0) {
+                                                focusRequester.requestFocus()
+                                                keyboardController?.show()
+                                            }
+                                        }
                                         Surface(
                                             shape = RoundedCornerShape(12.dp),
                                             color = MaterialTheme.colorScheme.surface,
                                             shadowElevation = 8.dp,
                                             border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f))
                                         ) {
-                                            Column(modifier = Modifier.width(160.dp).padding(4.dp)) {
+                                            Column(modifier = Modifier.width(300.dp).padding(3.dp)) {
                                                 GoalItem("Без цели", selectedGoal == null) {
                                                     selectedGoal = null
                                                     showGoalSelector = false
@@ -640,30 +663,44 @@ fun AddTaskSheetContent(
                                     }
                                 }
                             }
+                        }
 
-                            // Кнопка напоминаний (только иконка)
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Вторая строка: напоминание (растянуто) + кнопка отправки
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Кнопка напоминаний (растягивается)
                             Surface(
                                 onClick = { /* TODO */ },
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(43.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                )
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         Icons.TwoTone.DateRange,
                                         null,
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
                             }
 
-                            // Кнопка "Запланировать" (стрелка)
+                            // Кнопка "Запланировать" (фиксированный размер)
                             Surface(
                                 onClick = { if (taskName.isNotBlank()) triggerDismiss(taskName) },
                                 modifier = Modifier
-                                    .size(48.dp)
+                                    .size(43.dp)
                                     .semantics { testTag = "add_task_button" },
                                 shape = RoundedCornerShape(12.dp),
                                 color = if (taskName.isNotBlank())
@@ -677,7 +714,7 @@ fun AddTaskSheetContent(
                                         Icons.Default.ArrowForward,
                                         "Запланировать",
                                         tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
                             }
