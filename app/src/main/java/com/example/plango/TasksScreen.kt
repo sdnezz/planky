@@ -20,6 +20,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 
 import androidx.compose.animation.core.animateFloatAsState
@@ -28,6 +29,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -55,6 +58,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -79,7 +83,9 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.twotone.DateRange
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -122,16 +128,22 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
+import androidx.core.i18n.DateTimeFormatter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 import java.time.format.TextStyle as DateTextStyle
 import java.util.Locale
+import kotlin.math.abs
 
 @Composable
 fun TasksScreen() {
@@ -261,6 +273,8 @@ fun AddTaskSheetContent(
 
     var taskName by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
+
+    var showReminderDialog by remember { mutableStateOf(false) }
 
     // Подзадачи
     var subTasks by remember { mutableStateOf(listOf<SubTask>()) }
@@ -675,7 +689,7 @@ fun AddTaskSheetContent(
                         ) {
                             // Кнопка напоминаний (растягивается)
                             Surface(
-                                onClick = { /* TODO */ },
+                                onClick = { showReminderDialog = true },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(43.dp),
@@ -717,6 +731,18 @@ fun AddTaskSheetContent(
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
+                            }
+                            if (showReminderDialog) {
+                                ReminderPickerDialog(
+                                    initialDate = LocalDate.now(),        // или сохранённое значение
+                                    initialTime = LocalTime.now(),
+                                    onDismiss = { showReminderDialog = false },
+                                    onSave = { date, time, beforeValue, unit, weekdays ->
+                                        // Сохраните выбранные значения (можно в локальное состояние)
+                                        // Например, обновите переменные reminderDate, reminderTime и т.д.
+                                        showReminderDialog = false
+                                    }
+                                )
                             }
                         }
                     }
@@ -865,31 +891,705 @@ fun GoalItem(text: String, isSelected: Boolean, onClick: () -> Unit) {
     }
 }
 
-@Composable// Добавляем RowScope., чтобы weight стал доступен
-fun RowScope.PriorityButton(
-    label: String,
-    id: Int,
-    currentSelected: Int,
-    onClick: (Int) -> Unit
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun ReminderPickerDialog(
+    initialDate: LocalDate,
+    initialTime: LocalTime,
+    onDismiss: () -> Unit,
+    onSave: (LocalDate, LocalTime, Int, ReminderUnit, Set<DayOfWeek>) -> Unit
 ) {
-    val isSelected = id == currentSelected
-    Surface(
-        onClick = { onClick(if (isSelected) 0 else id) },
-        modifier = Modifier
-            .height(32.dp)
-            .weight(1f), // Теперь ошибка исчезнет
-        shape = RoundedCornerShape(6.dp),
-        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.2f))
+    var selectedDate by remember { mutableStateOf(initialDate) }
+    var currentMonth by remember { mutableStateOf(initialDate.withDayOfMonth(1)) }
+    var selectedTime by remember { mutableStateOf(LocalTime.now().plusHours(1)) }
+    var remindBeforeValue by remember { mutableStateOf(5) }
+    var remindBeforeUnit by remember { mutableStateOf(ReminderUnit.MINUTES) }
+    var selectedWeekdays by remember { mutableStateOf<Set<DayOfWeek>>(emptySet()) }
+    var resetTimeTrigger by remember { mutableIntStateOf(0) }
+    var isVisible by remember { mutableStateOf(false) }
+    var pendingSave by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        isVisible = true
+    }
+    LaunchedEffect(isVisible) {
+        if (!isVisible) {
+            delay(150) // ждём завершения exit-анимации
+            if (pendingSave) {
+                onSave(selectedDate, selectedTime, remindBeforeValue, remindBeforeUnit, selectedWeekdays)
+            } else {
+                onDismiss()
+            }
+        }
+    }
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 0.5f else 0f,
+        animationSpec = tween(200)
+    )
+    Dialog(
+        onDismissRequest = { isVisible = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false,decorFitsSystemWindows = false)
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = label,
-                fontSize = 10.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                color = if (isSelected) Color.White else Color.Gray,
-                maxLines = 1
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = scrimAlpha))
+                .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                    isVisible = false // клик на фон запускает выход
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            AnimatedVisibility(
+                visible = isVisible,
+                enter = fadeIn(animationSpec = tween(200)) +
+                        scaleIn(
+                            initialScale = 0.8f,
+                            animationSpec = tween(200, easing = FastOutSlowInEasing)
+                        ),
+                exit = fadeOut(animationSpec = tween(150)) +
+                        scaleOut(
+                            targetScale = 0.8f,
+                            animationSpec = tween(150, easing = FastOutSlowInEasing)
+                        )
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .verticalScroll(rememberScrollState())
+                            .animateContentSize(tween(200))
+                    ) {
+                        Spacer(modifier = Modifier.height(15.dp))
+                        // === Строка с заголовком, сводкой и кнопкой "Сбросить" ===
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Выполнить до:",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                val formatted = remember(selectedDate, selectedTime) {
+                                    val day = selectedDate.dayOfMonth
+                                    val month = selectedDate.month.getDisplayName(
+                                        DateTextStyle.SHORT,
+                                        Locale("ru")
+                                    )
+                                    val year = selectedDate.year
+                                    val timeStr = String.format(
+                                        "%02d:%02d",
+                                        selectedTime.hour,
+                                        selectedTime.minute
+                                    )
+                                    "$timeStr $day $month $year"
+                                }
+                                Text(
+                                    text = formatted,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 18.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        // === Время + Календарь ===
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            // Колонка с временем и кнопкой "Сбросить"
+                            Column(
+                                modifier = Modifier.weight(0.9f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                TimeWheel(
+                                    initialHour = selectedTime.hour,
+                                    initialMinute = selectedTime.minute,
+                                    resetTrigger = resetTimeTrigger,
+                                    onTimeChanged = { hour, minute ->
+                                        selectedTime = LocalTime.of(hour, minute)
+                                    }
+                                )
+
+                                TextButton(
+                                    onClick = {
+                                        val now = LocalDate.now()
+                                        selectedDate = now
+                                        selectedTime = LocalTime.now().plusHours(1)
+                                        currentMonth = now.withDayOfMonth(1)
+                                        resetTimeTrigger++
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                ) {
+                                    Text(
+                                        "Сбросить",
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            }
+
+                            // Календарь
+                            Box(modifier = Modifier.weight(1.2f)) {
+                                CompactDatePicker(
+                                    selectedDate = selectedDate,
+                                    currentMonth = currentMonth,
+                                    onMonthChanged = { currentMonth = it },
+                                    onDateSelected = { selectedDate = it }
+                                )
+                            }
+                        }
+                        HorizontalDivider(
+                            modifier = Modifier.padding(top = 0.dp, bottom = 8.dp),
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
+                        )
+    // === "Напомнить за:" ===
+                        Text(
+                            "Напомнить за:",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // === Два колеса и надпись "ДО" ===
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(0.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val numbers = remember { (0..60).toList() }
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                WheelPicker(
+                                    items = numbers,
+                                    initialItem = remindBeforeValue,
+                                    itemHeight = 36.dp,
+                                    visibleItems = 5,
+                                    centerFontSize = 20.sp,
+                                    secondaryFontSize = 16.sp,
+                                    onItemSelected = { remindBeforeValue = it }
+                                )
+                            }
+
+                            val units = remember { ReminderUnit.values().toList() }
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                WheelPicker(
+                                    items = units,
+                                    initialItem = remindBeforeUnit,
+                                    itemHeight = 36.dp,
+                                    visibleItems = 5,
+                                    centerFontSize = 20.sp,
+                                    secondaryFontSize = 16.sp,
+                                    formatter = { it.displayName },
+                                    onItemSelected = { remindBeforeUnit = it }
+                                )
+                            }
+
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                Text(
+                                    "ДО",
+                                    fontSize = 28.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+
+    //                Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider(
+                            modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
+                        )
+                        // === "Повторять каждые:" ===
+                        Text(
+                            "Повторять задачу каждый:",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // === Дни недели ===
+                        WeekdaySelector(
+                            selectedDays = selectedWeekdays,
+                            onSelectionChanged = { selectedWeekdays = it }
+                        )
+
+                        Spacer(modifier = Modifier.height(15.dp))
+
+                        // === Кнопки "Отмена" и "Сохранить" ===
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    pendingSave = false
+                                    isVisible = false
+                                }
+                            ){
+                                Text("Отмена", fontSize = 16.sp)
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Button(
+                                onClick = {
+                                    pendingSave = true
+                                    isVisible = false
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Text("Сохранить", fontSize = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TimeWheel(
+    initialHour: Int,
+    initialMinute: Int,
+    resetTrigger: Int = 0,
+    onTimeChanged: (hour: Int, minute: Int) -> Unit
+) {
+    val hours = remember { (0..23).toList() }
+    val minutes = remember { (0..59).toList() }
+
+    val hourState = rememberLazyListState(initialFirstVisibleItemIndex = hours.indexOf(initialHour))
+    val minuteState = rememberLazyListState(initialFirstVisibleItemIndex = minutes.indexOf(initialMinute))
+
+    // Прокрутка при сбросе
+    LaunchedEffect(resetTrigger) {
+        if (resetTrigger > 0) {
+            hourState.animateScrollToItem(hours.indexOf(initialHour))
+            minuteState.animateScrollToItem(minutes.indexOf(initialMinute))
+        }
+    }
+
+    // Определяем центральные элементы
+    val currentHour by remember {
+        derivedStateOf {
+            val layoutInfo = hourState.layoutInfo
+            val visibleItems = layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) initialHour
+            else {
+                val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+                visibleItems.minByOrNull { abs((it.offset + it.size / 2) - viewportCenter) }
+                    ?.let { hours[it.index] } ?: initialHour
+            }
+        }
+    }
+    val currentMinute by remember {
+        derivedStateOf {
+            val layoutInfo = minuteState.layoutInfo
+            val visibleItems = layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) initialMinute
+            else {
+                val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+                visibleItems.minByOrNull { abs((it.offset + it.size / 2) - viewportCenter) }
+                    ?.let { minutes[it.index] } ?: initialMinute
+            }
+        }
+    }
+
+    LaunchedEffect(currentHour, currentMinute) {
+        onTimeChanged(currentHour, currentMinute)
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        WheelColumn(
+            items = hours,
+            state = hourState,
+            formatter = { it.toString().padStart(2, '0') },
+            modifier = Modifier.weight(1f)
+        )
+        Text(":", fontSize = 20.sp, modifier = Modifier.padding(horizontal = 2.dp))
+        WheelColumn(
+            items = minutes,
+            state = minuteState,
+            formatter = { it.toString().padStart(2, '0') },
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun <T> WheelColumn(
+    items: List<T>,
+    state: LazyListState,
+    formatter: (T) -> String,
+    modifier: Modifier = Modifier
+) {
+    val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = state)
+    val density = LocalDensity.current
+    val itemHeightPx = with(density) { 40.dp.toPx() }
+    val viewportHeightPx = with(density) { 200.dp.toPx() }
+
+    Box(modifier = modifier.height(200.dp), contentAlignment = Alignment.Center) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.8f)
+                .height(40.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+            shape = RoundedCornerShape(12.dp)
+        ) {}
+
+        LazyColumn(
+            state = state,
+            flingBehavior = snapFlingBehavior,
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            contentPadding = PaddingValues(vertical = 80.dp)
+        ) {
+            items(items.size) { index ->
+                val item = items[index]
+                val isCenter = index == state.firstVisibleItemIndex
+                val animatedColor by animateColorAsState(
+                    targetValue = if (isCenter) MaterialTheme.colorScheme.primary else Color.Gray,
+                    animationSpec = tween(150)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            val firstIdx = state.firstVisibleItemIndex
+                            val firstOffset = state.firstVisibleItemScrollOffset.toFloat()
+                            val contentPaddingPx = 80.dp.toPx()
+                            val itemTopInViewport = (index - firstIdx) * itemHeightPx - firstOffset + contentPaddingPx
+                            val itemCenterInViewport = itemTopInViewport + (itemHeightPx / 2f)
+                            val viewCenter = viewportHeightPx / 2f
+                            val dist = abs(viewCenter - itemCenterInViewport)
+                            val maxDist = itemHeightPx * 2.5f
+
+                            if (dist < maxDist) {
+                                val progress = (dist / maxDist).coerceIn(0f, 1f)
+                                alpha = (1f - progress * 0.9f).coerceIn(0f, 1f)
+                                val scale = (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
+                                scaleX = scale
+                                scaleY = scale
+                            } else {
+                                alpha = 0f
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = formatter(item),
+                        fontSize = if (isCenter) 20.sp else 16.sp,
+                        fontWeight = if (isCenter) FontWeight.ExtraBold else FontWeight.Medium,
+                        color = animatedColor
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Компактный календарь (использует MonthPager, но без лишних отступов)
+// ---------------------------------------------------------------------
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun CompactDatePicker(
+    selectedDate: LocalDate,
+    currentMonth: LocalDate,
+    onMonthChanged: (LocalDate) -> Unit,
+    onDateSelected: (LocalDate) -> Unit
+) {
+    var isMonthYearPickerMode by remember { mutableStateOf(false) }
+    val today = LocalDate.now()
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Column {
+        // Кнопка месяца/года с иконкой
+        Button(
+            onClick = { isMonthYearPickerMode = !isMonthYearPickerMode },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
             )
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = currentMonth.month.getDisplayName(DateTextStyle.FULL, Locale("ru"))
+                        .replaceFirstChar { it.uppercase() } + " ${currentMonth.year}",
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    if (isMonthYearPickerMode) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        if (isMonthYearPickerMode) {
+            // Режим выбора месяца и года
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val months = remember {
+                        (1..12).map { month ->
+                            LocalDate.of(2000, month, 1).month.getDisplayName(DateTextStyle.FULL, Locale("ru"))
+                                .replaceFirstChar { it.uppercase() }
+                        }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        WheelPicker(
+                            items = months,
+                            initialItem = months[currentMonth.monthValue - 1],
+                            itemHeight = 36.dp,
+                            visibleItems = 5,
+                            centerFontSize = 16.sp,
+                            secondaryFontSize = 12.sp,
+                            onItemSelected = { monthName ->
+                                val monthIndex = months.indexOf(monthName) + 1
+                                onMonthChanged(currentMonth.withMonth(monthIndex))
+                            }
+                        )
+                    }
+                    val years = remember { (2000..2100).toList() }
+                    Box(modifier = Modifier.weight(1f)) {
+                        WheelPicker(
+                            items = years,
+                            initialItem = currentMonth.year,
+                            itemHeight = 36.dp,
+                            visibleItems = 5,
+                            centerFontSize = 16.sp,
+                            secondaryFontSize = 12.sp,
+                            formatter = { it.toString() },
+                            onItemSelected = { year ->
+                                onMonthChanged(currentMonth.withYear(year))
+                            }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(1.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = { isMonthYearPickerMode = false }) {
+                        Text("Отмена", fontSize = 14.sp)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { isMonthYearPickerMode = false },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text("OK", fontSize = 14.sp)
+                    }
+                }
+            }
+        } else {
+            MonthPagerCompact(
+                currentMonth = currentMonth,
+                selectedDate = selectedDate,
+                today = today,
+                onMonthChanged = onMonthChanged,
+                onDateClick = onDateSelected
+            )
+        }
+    }
+}
+
+@Composable
+fun MonthPagerCompact(
+    currentMonth: LocalDate,
+    selectedDate: LocalDate,
+    today: LocalDate,
+    onMonthChanged: (LocalDate) -> Unit,
+    onDateClick: (LocalDate) -> Unit
+) {
+    val initialPage = 500
+    val pagerState = rememberPagerState(initialPage = initialPage) { 1000 }
+
+    LaunchedEffect(currentMonth.year, currentMonth.monthValue) {
+        val monthDiff = ChronoUnit.MONTHS.between(
+            today.withDayOfMonth(1),
+            currentMonth.withDayOfMonth(1)
+        ).toInt()
+        val targetPage = initialPage + monthDiff
+        if (pagerState.currentPage != targetPage) {
+            pagerState.scrollToPage(targetPage)
+        }
+    }
+
+    LaunchedEffect(pagerState.currentPage) {
+        val offset = pagerState.currentPage - initialPage
+        val newMonth = today.withDayOfMonth(1).plusMonths(offset.toLong())
+        if (newMonth.monthValue != currentMonth.monthValue || newMonth.year != currentMonth.year) {
+            onMonthChanged(newMonth)
+        }
+    }
+
+    Column {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").forEach {
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(it, fontSize = 11.sp, color = Color.Gray)
+                }
+            }
+        }
+        HorizontalPager(state = pagerState) { page ->
+            val monthOffset = page - initialPage
+            val monthDate = today.withDayOfMonth(1).plusMonths(monthOffset.toLong())
+            CalendarGridCompact(monthDate, selectedDate, today, onDateClick)
+        }
+    }
+}
+
+@Composable
+fun CalendarGridCompact(
+    monthDate: LocalDate,
+    selectedDate: LocalDate,
+    today: LocalDate,
+    onDateClick: (LocalDate) -> Unit
+) {
+    val firstDayOfMonth = monthDate.withDayOfMonth(1)
+    val lastDayOfMonth = monthDate.plusMonths(1).minusDays(1)
+    val daysInMonth = lastDayOfMonth.dayOfMonth
+    val firstDayWeekValue = firstDayOfMonth.dayOfWeek.value // 1=Пн, 7=Вс
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        for (row in 0 until 6) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                for (col in 1..7) {
+                    val dayNumber = row * 7 + col - (firstDayWeekValue - 1)
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (dayNumber in 1..daysInMonth) {
+                            val date = monthDate.withDayOfMonth(dayNumber)
+                            val isSelected = date == selectedDate
+                            val isToday = date == today
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(
+                                        color = when {
+                                            isSelected -> MaterialTheme.colorScheme.primary
+                                            isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                            else -> Color.Transparent
+                                        },
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { onDateClick(date) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = dayNumber.toString(),
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.size(32.dp))
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Колесо единиц измерения (минуты, часы, дни, недели, месяцы)
+// ---------------------------------------------------------------------
+enum class ReminderUnit(val displayName: String) {
+    MINUTES("минут"),
+    HOURS("часов"),
+    DAYS("дней"),
+    WEEKS("недель"),
+    MONTHS("месяцев")
+}
+
+// ---------------------------------------------------------------------
+// Выбор дней недели (круглые кнопки)
+// ---------------------------------------------------------------------
+@Composable
+fun WeekdaySelector(
+    selectedDays: Set<DayOfWeek>,
+    onSelectionChanged: (Set<DayOfWeek>) -> Unit
+) {
+    val days = listOf(
+        DayOfWeek.MONDAY to "ПН",
+        DayOfWeek.TUESDAY to "ВТ",
+        DayOfWeek.WEDNESDAY to "СР",
+        DayOfWeek.THURSDAY to "ЧТ",
+        DayOfWeek.FRIDAY to "ПТ",
+        DayOfWeek.SATURDAY to "СБ",
+        DayOfWeek.SUNDAY to "ВС"
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        days.forEach { (day, label) ->
+            val isSelected = day in selectedDays
+            Box(
+                modifier = Modifier
+                    .size(35.dp)
+                    .background(
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.3f),
+                        shape = CircleShape
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null)
+                    {
+                        onSelectionChanged(
+                            if (isSelected) selectedDays - day else selectedDays + day
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 14.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSelected) Color.White else Color.Gray
+                )
+            }
         }
     }
 }
@@ -1307,6 +2007,123 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
             shape = RoundedCornerShape(12.dp)
         ) {
             Text("ВЫБРАТЬ $currentYear")
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun <T> WheelPicker(
+    items: List<T>,
+    initialItem: T,
+    itemHeight: Dp = 40.dp,
+    visibleItems: Int = 5,
+    formatter: (T) -> String = { it.toString() },
+    centerFontSize: androidx.compose.ui.unit.TextUnit = 20.sp,    // новый параметр
+    secondaryFontSize: androidx.compose.ui.unit.TextUnit = 16.sp, // новый параметр
+    onItemSelected: (T) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val itemHeightPx = with(density) { itemHeight.toPx() }
+    val viewportHeight = itemHeight * visibleItems
+
+    val initialIndex = items.indexOf(initialItem).coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
+
+    LaunchedEffect(initialItem) {
+        val index = items.indexOf(initialItem)
+        if (index >= 0) {
+            listState.animateScrollToItem(index)
+        }
+    }
+
+    val centerIndex by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val visibleItemsInfo = layoutInfo.visibleItemsInfo
+            if (visibleItemsInfo.isEmpty()) initialIndex
+            else {
+                val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+                visibleItemsInfo.minByOrNull { info ->
+                    abs((info.offset + info.size / 2) - viewportCenter)
+                }?.index ?: initialIndex
+            }
+        }
+    }
+
+    LaunchedEffect(centerIndex) {
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+
+    val currentItem = items.getOrElse(centerIndex) { initialItem }
+    LaunchedEffect(currentItem) {
+        onItemSelected(currentItem)
+    }
+
+    Box(
+        modifier = modifier.height(viewportHeight),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.8f)
+                .height(itemHeight),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+            shape = RoundedCornerShape(12.dp)
+        ) {}
+
+        LazyColumn(
+            state = listState,
+            flingBehavior = snapFlingBehavior,
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            contentPadding = PaddingValues(vertical = (viewportHeight - itemHeight) / 2)
+        ) {
+            items(items.size) { index ->
+                val item = items[index]
+                val isCenter = index == centerIndex
+                val animatedColor by animateColorAsState(
+                    targetValue = if (isCenter) MaterialTheme.colorScheme.primary else Color.Gray,
+                    animationSpec = tween(150)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .height(itemHeight)
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            val firstIdx = listState.firstVisibleItemIndex
+                            val firstOffset = listState.firstVisibleItemScrollOffset.toFloat()
+                            val contentPaddingPx = ((viewportHeight - itemHeight) / 2).toPx()
+                            val itemTopInViewport = (index - firstIdx) * itemHeightPx - firstOffset + contentPaddingPx
+                            val itemCenterInViewport = itemTopInViewport + (itemHeightPx / 2f)
+                            val viewCenter = viewportHeight.toPx() / 2f
+                            val dist = abs(viewCenter - itemCenterInViewport)
+                            val maxDist = itemHeightPx * 2.5f
+
+                            if (dist < maxDist) {
+                                val progress = (dist / maxDist).coerceIn(0f, 1f)
+                                alpha = (1f - progress * 0.9f).coerceIn(0f, 1f)
+                                val scale = (1.25f - progress * 0.55f).coerceIn(0.6f, 1.25f)
+                                scaleX = scale
+                                scaleY = scale
+                            } else {
+                                alpha = 0f
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = formatter(item),
+                        fontSize = if (isCenter) centerFontSize else secondaryFontSize,
+                        fontWeight = if (isCenter) FontWeight.ExtraBold else FontWeight.Medium,
+                        color = animatedColor
+                    )
+                }
+            }
         }
     }
 }
