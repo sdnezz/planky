@@ -734,12 +734,11 @@ fun AddTaskSheetContent(
                             }
                             if (showReminderDialog) {
                                 ReminderPickerDialog(
-                                    initialDate = LocalDate.now(),        // или сохранённое значение
-                                    initialTime = LocalTime.now(),
+                                    initialDate = LocalDate.now(), // или сохранённое значение
+                                    initialTime = LocalTime.now().plusHours(1),
                                     onDismiss = { showReminderDialog = false },
-                                    onSave = { date, time, beforeValue, unit, weekdays ->
-                                        // Сохраните выбранные значения (можно в локальное состояние)
-                                        // Например, обновите переменные reminderDate, reminderTime и т.д.
+                                    onSave = { date, time, value, unit, weekdays ->
+                                        // сохраняем настройки
                                         showReminderDialog = false
                                     }
                                 )
@@ -899,6 +898,8 @@ fun ReminderPickerDialog(
     onDismiss: () -> Unit,
     onSave: (LocalDate, LocalTime, Int, ReminderUnit, Set<DayOfWeek>) -> Unit
 ) {
+    val coroutineScope = rememberCoroutineScope()
+
     var selectedDate by remember { mutableStateOf(initialDate) }
     var currentMonth by remember { mutableStateOf(initialDate.withDayOfMonth(1)) }
     var selectedTime by remember { mutableStateOf(LocalTime.now().plusHours(1)) }
@@ -906,258 +907,221 @@ fun ReminderPickerDialog(
     var remindBeforeUnit by remember { mutableStateOf(ReminderUnit.MINUTES) }
     var selectedWeekdays by remember { mutableStateOf<Set<DayOfWeek>>(emptySet()) }
     var resetTimeTrigger by remember { mutableIntStateOf(0) }
-    var isVisible by remember { mutableStateOf(false) }
-    var pendingSave by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        isVisible = true
-    }
-    LaunchedEffect(isVisible) {
-        if (!isVisible) {
-            delay(150) // ждём завершения exit-анимации
-            if (pendingSave) {
-                onSave(selectedDate, selectedTime, remindBeforeValue, remindBeforeUnit, selectedWeekdays)
-            } else {
-                onDismiss()
-            }
-        }
-    }
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (isVisible) 0.5f else 0f,
-        animationSpec = tween(200)
-    )
-    Dialog(
-        onDismissRequest = { isVisible = false },
-        properties = DialogProperties(usePlatformDefaultWidth = false,decorFitsSystemWindows = false)
+
+    var isContentVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { isContentVisible = true }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.padding(horizontal = 12.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = scrimAlpha))
-                .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
-                    isVisible = false // клик на фон запускает выход
-                },
-            contentAlignment = Alignment.Center
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            AnimatedVisibility(
-                visible = isVisible,
-                enter = fadeIn(animationSpec = tween(200)) +
-                        scaleIn(
-                            initialScale = 0.8f,
-                            animationSpec = tween(200, easing = FastOutSlowInEasing)
-                        ),
-                exit = fadeOut(animationSpec = tween(150)) +
-                        scaleOut(
-                            targetScale = 0.8f,
-                            animationSpec = tween(150, easing = FastOutSlowInEasing)
-                        )
+            // Содержимое (Column с календарём, колёсами, кнопками) без изменений
+            Column(
+                modifier = Modifier
+                    .padding(12.dp)
+                    .verticalScroll(rememberScrollState())
+                    .animateContentSize(tween(200))
             ) {
-                Surface(
-                    shape = RoundedCornerShape(28.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 8.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
+                Spacer(modifier = Modifier.height(15.dp))
+                // === Строка с заголовком, сводкой и кнопкой "Сбросить" ===
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Выполнить до:",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        val formatted = remember(selectedDate, selectedTime) {
+                            val day = selectedDate.dayOfMonth
+                            val month = selectedDate.month.getDisplayName(
+                                DateTextStyle.SHORT,
+                                Locale("ru")
+                            )
+                            val year = selectedDate.year
+                            val timeStr = String.format(
+                                "%02d:%02d",
+                                selectedTime.hour,
+                                selectedTime.minute
+                            )
+                            "$timeStr $day $month $year"
+                        }
+                        Text(
+                            text = formatted,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 18.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                // === Время + Календарь ===
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    // Колонка с временем и кнопкой "Сбросить"
                     Column(
-                        modifier = Modifier
-                            .padding(12.dp)
-                            .verticalScroll(rememberScrollState())
-                            .animateContentSize(tween(200))
+                        modifier = Modifier.weight(0.9f),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Spacer(modifier = Modifier.height(15.dp))
-                        // === Строка с заголовком, сводкой и кнопкой "Сбросить" ===
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "Выполнить до:",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                val formatted = remember(selectedDate, selectedTime) {
-                                    val day = selectedDate.dayOfMonth
-                                    val month = selectedDate.month.getDisplayName(
-                                        DateTextStyle.SHORT,
-                                        Locale("ru")
-                                    )
-                                    val year = selectedDate.year
-                                    val timeStr = String.format(
-                                        "%02d:%02d",
-                                        selectedTime.hour,
-                                        selectedTime.minute
-                                    )
-                                    "$timeStr $day $month $year"
-                                }
-                                Text(
-                                    text = formatted,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 18.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    maxLines = 1
-                                )
+                        TimeWheel(
+                            initialHour = selectedTime.hour,
+                            initialMinute = selectedTime.minute,
+                            resetTrigger = resetTimeTrigger,
+                            onTimeChanged = { hour, minute ->
+                                selectedTime = LocalTime.of(hour, minute)
                             }
-                        }
-
-                        // === Время + Календарь ===
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            // Колонка с временем и кнопкой "Сбросить"
-                            Column(
-                                modifier = Modifier.weight(0.9f),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                TimeWheel(
-                                    initialHour = selectedTime.hour,
-                                    initialMinute = selectedTime.minute,
-                                    resetTrigger = resetTimeTrigger,
-                                    onTimeChanged = { hour, minute ->
-                                        selectedTime = LocalTime.of(hour, minute)
-                                    }
-                                )
-
-                                TextButton(
-                                    onClick = {
-                                        val now = LocalDate.now()
-                                        selectedDate = now
-                                        selectedTime = LocalTime.now().plusHours(1)
-                                        currentMonth = now.withDayOfMonth(1)
-                                        resetTimeTrigger++
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                                ) {
-                                    Text(
-                                        "Сбросить",
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                            }
-
-                            // Календарь
-                            Box(modifier = Modifier.weight(1.2f)) {
-                                CompactDatePicker(
-                                    selectedDate = selectedDate,
-                                    currentMonth = currentMonth,
-                                    onMonthChanged = { currentMonth = it },
-                                    onDateSelected = { selectedDate = it }
-                                )
-                            }
-                        }
-                        HorizontalDivider(
-                            modifier = Modifier.padding(top = 0.dp, bottom = 8.dp),
-                            thickness = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
                         )
-    // === "Напомнить за:" ===
+
+                        TextButton(
+                            onClick = {
+                                val now = LocalDate.now()
+                                selectedDate = now
+                                selectedTime = LocalTime.now().plusHours(1)
+                                currentMonth = now.withDayOfMonth(1)
+                                resetTimeTrigger++
+                            },
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                "Сбросить",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+
+                    // Календарь
+                    Box(modifier = Modifier.weight(1.2f)) {
+                        CompactDatePicker(
+                            selectedDate = selectedDate,
+                            currentMonth = currentMonth,
+                            onMonthChanged = { currentMonth = it },
+                            onDateSelected = { selectedDate = it }
+                        )
+                    }
+                }
+                HorizontalDivider(
+                    modifier = Modifier.padding(top = 0.dp, bottom = 8.dp),
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
+                )
+                // === "Напомнить за:" ===
+                Text(
+                    "Напомнить за:",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // === Два колеса и надпись "ДО" ===
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(0.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val numbers = remember { (0..60).toList() }
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        WheelPicker(
+                            items = numbers,
+                            initialItem = remindBeforeValue,
+                            itemHeight = 36.dp,
+                            visibleItems = 5,
+                            centerFontSize = 20.sp,
+                            secondaryFontSize = 16.sp,
+                            onItemSelected = { remindBeforeValue = it }
+                        )
+                    }
+
+                    val units = remember { ReminderUnit.values().toList() }
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        WheelPicker(
+                            items = units,
+                            initialItem = remindBeforeUnit,
+                            itemHeight = 36.dp,
+                            visibleItems = 5,
+                            centerFontSize = 20.sp,
+                            secondaryFontSize = 16.sp,
+                            formatter = { it.displayName },
+                            onItemSelected = { remindBeforeUnit = it }
+                        )
+                    }
+
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         Text(
-                            "Напомнить за:",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            "ДО",
+                            fontSize = 28.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.ExtraBold
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
 
-                        // === Два колеса и надпись "ДО" ===
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(0.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val numbers = remember { (0..60).toList() }
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                WheelPicker(
-                                    items = numbers,
-                                    initialItem = remindBeforeValue,
-                                    itemHeight = 36.dp,
-                                    visibleItems = 5,
-                                    centerFontSize = 20.sp,
-                                    secondaryFontSize = 16.sp,
-                                    onItemSelected = { remindBeforeValue = it }
-                                )
-                            }
+                //                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
+                )
+                // === "Повторять каждые:" ===
+                Text(
+                    "Повторять задачу каждый:",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
 
-                            val units = remember { ReminderUnit.values().toList() }
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                WheelPicker(
-                                    items = units,
-                                    initialItem = remindBeforeUnit,
-                                    itemHeight = 36.dp,
-                                    visibleItems = 5,
-                                    centerFontSize = 20.sp,
-                                    secondaryFontSize = 16.sp,
-                                    formatter = { it.displayName },
-                                    onItemSelected = { remindBeforeUnit = it }
-                                )
-                            }
+                // === Дни недели ===
+                WeekdaySelector(
+                    selectedDays = selectedWeekdays,
+                    onSelectionChanged = { selectedWeekdays = it }
+                )
 
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                Text(
-                                    "ДО",
-                                    fontSize = 28.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
-                        }
+                Spacer(modifier = Modifier.height(15.dp))
 
-    //                Spacer(modifier = Modifier.height(8.dp))
-                        HorizontalDivider(
-                            modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
-                            thickness = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
-                        )
-                        // === "Повторять каждые:" ===
-                        Text(
-                            "Повторять задачу каждый:",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // === Дни недели ===
-                        WeekdaySelector(
-                            selectedDays = selectedWeekdays,
-                            onSelectionChanged = { selectedWeekdays = it }
-                        )
-
-                        Spacer(modifier = Modifier.height(15.dp))
-
-                        // === Кнопки "Отмена" и "Сохранить" ===
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    pendingSave = false
-                                    isVisible = false
-                                }
-                            ){
-                                Text("Отмена", fontSize = 16.sp)
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Button(
-                                onClick = {
-                                    pendingSave = true
-                                    isVisible = false
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                            ) {
-                                Text("Сохранить", fontSize = 16.sp)
-                            }
-                        }
+                // === Кнопки "Отмена" и "Сохранить" ===
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(
+                        onClick = onDismiss
+                    ) {
+                        Text("Отмена", fontSize = 16.sp)
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Button(
+                        onClick = {
+                            onSave(
+                                selectedDate,
+                                selectedTime,
+                                remindBeforeValue,
+                                remindBeforeUnit,
+                                selectedWeekdays
+                            )
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text("Сохранить", fontSize = 16.sp)
                     }
                 }
             }
