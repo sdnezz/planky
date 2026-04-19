@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.baselineprofile)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -81,4 +82,7 @@ dependencies {
     "baselineProfile"(project(":app:baselineprofile"))
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp("androidx.room:room-compiler:2.8.4")
 }

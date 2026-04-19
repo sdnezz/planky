@@ -22,7 +22,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
-
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -59,6 +58,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -85,12 +85,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -98,6 +100,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -139,14 +142,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import java.time.format.TextStyle as DateTextStyle
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.text.isNotBlank
 
 @Composable
 fun TasksScreen() {
+    var showAddTaskSheet by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val today = LocalDate.now()
@@ -169,67 +176,313 @@ fun TasksScreen() {
             .replaceFirstChar { it.uppercase() } + " ${mondayOfVisibleWeek.year}"
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val db = remember { AppDatabase.getDatabase(context) }
+    val taskDao = db.taskDao()
+//
+    // Получаем задачи для БД (в реальном приложении лучше через ViewModel)
+    val startOfDay = selectedDate.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+    val endOfDay =
+        selectedDate.atTime(java.time.LocalTime.MAX).atZone(java.time.ZoneOffset.UTC).toInstant()
+            .toEpochMilli()
+//
+//    // Подписываемся на поток данных из БД
+    val tasksFlow =
+        remember(selectedDate) { taskDao.getTasksWithSubtasksForDay(startOfDay, endOfDay) }
+    val tasksList by tasksFlow.collectAsState(initial = emptyList())
+
+    // 2. Добавляем Scaffold для TasksScreen
+//    Scaffold(
+//        floatingActionButton = {
+//            FloatingActionButton(
+//                onClick = { showAddTaskSheet = true },
+//                containerColor = MaterialTheme.colorScheme.primary,
+//                shape = RoundedCornerShape(16.dp)
+//            ) {
+//                Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
+//            }
+//        },
+//        // Фон делаем прозрачным, чтобы не перекрывать фон MainScreen если нужно
+//        containerColor = Color.Transparent
+//    ) { paddingValues ->
+        // 3. Весь основной контент Column оборачиваем в Box/Column с учетом paddingValues
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
         ) {
-            Text(
-                text = displayedMonthText,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = displayedMonthText,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                IconButton(onClick = { showDatePicker = true }) {
+                    Icon(imageVector = Icons.Default.DateRange, contentDescription = "Календарь")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            CalendarWeekPager(
+                pagerState = pagerState,
+                initialPage = initialPage,
+                selectedDate = selectedDate,
+                onDateSelected = { selectedDate = it }
             )
-            IconButton(onClick = { showDatePicker = true }) {
-                Icon(imageVector = Icons.Default.DateRange, contentDescription = "Календарь")
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = if (selectedDate == today) "Задачи на сегодня"
+                else "Задачи на ${selectedDate.dayOfMonth} ${
+                    selectedDate.month.getDisplayName(
+                        DateTextStyle.FULL,
+                        Locale("ru")
+                    )
+                }",
+                fontWeight = FontWeight.Medium,
+                color = Color.Gray
+            )
+
+            // Оборачиваем в Box только LazyColumn и кнопку
+            Box(modifier = Modifier.weight(1f)) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(tasksList) { item ->
+                        TaskItemView(
+                            task = item.task,
+                            subtasks = item.subtasks,
+                            onToggleCompleted = { updatedTask ->
+                                coroutineScope.launch { taskDao.updateTask(updatedTask) }
+                            }
+                        )
+                    }
+                }
+
+                // Кнопка справа внизу поверх списка
+                FloatingActionButton(
+                    onClick = { showAddTaskSheet = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(36.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 16.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
 
-        CalendarWeekPager(
-            pagerState = pagerState,
-            initialPage = initialPage,
-            selectedDate = selectedDate,
-            onDateSelected = { selectedDate = it }
-        )
+        if (showAddTaskSheet) {
+            AddTaskDialog(
+                onDismiss = { showAddTaskSheet = false },
+                onTaskAdded = {
+                              title, important, urgent, diff, subTasksList, deadline, remind, weekdays ->
+                    coroutineScope.launch {
+                        // 1. Создаем основную задачу
+                        val newTask = TaskEntity(
+                            title = title,
+                            date_of_task = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+                            is_important = important,
+                            is_urgency = urgent,
+                            difficulty = if (diff == 0) 1 else diff,
+                            is_completed = false,
+                            deadline_date = deadline?.toInstant(ZoneOffset.UTC)?.toEpochMilli(),
+                            remind_date = remind?.toInstant(ZoneOffset.UTC)?.toEpochMilli(),
+                            repeat_mon = weekdays.contains(DayOfWeek.MONDAY),
+                            repeat_tue = weekdays.contains(DayOfWeek.TUESDAY),
+                            repeat_wed = weekdays.contains(DayOfWeek.WEDNESDAY),
+                            repeat_thu = weekdays.contains(DayOfWeek.THURSDAY),
+                            repeat_fri = weekdays.contains(DayOfWeek.FRIDAY),
+                            repeat_sat = weekdays.contains(DayOfWeek.SATURDAY),
+                            repeat_sun = weekdays.contains(DayOfWeek.SUNDAY)
+                        )
 
-        Spacer(modifier = Modifier.height(24.dp))
+                        // 2. Вставляем задачу и получаем её ID
+                        val taskId = taskDao.insertTask(newTask)
 
-        Text(
-            text = if (selectedDate == today) "Задачи на сегодня"
-            else "Задачи на ${selectedDate.dayOfMonth} ${selectedDate.month.getDisplayName(DateTextStyle.FULL, Locale("ru"))}",
-            fontWeight = FontWeight.Medium,
-            color = Color.Gray
-        )
-    }
+                        // 3. Сохраняем подзадачи, привязывая их к taskId
+                        subTasksList.forEach { subTaskData ->
+                            val subTaskText = subTaskData.textValue.text.trim()
+                            // Проверяем на пустую строку (добавлен безопасный вызов ?. и импорт выше)
+                            if (!subTaskData.textValue.text.isNotBlank()) {
+                                taskDao.insertSubTask(
+                                    SubTaskEntity(
+                                        task_id = taskId.toInt(),
+                                        subtask_title = subTaskText,
+                                        is_completed = subTaskData.isDone
+                                    )
+                                )
+                            }
+                        }
 
-    if (showDatePicker) {
-        CustomDatePickerDialog(
-            initialDate = selectedDate,
-            onDismiss = { showDatePicker = false },
-            onConfirm = { pickedDate ->
-                selectedDate = pickedDate
-                showDatePicker = false
-
-                // ВЫЧИСЛЯЕМ ЦЕЛЕВУЮ СТРАНИЦУ ДЛЯ ПЕЙДЖЕРА
-                // 1. Находим разницу в неделях между "сегодня" и выбранной датой
-                val todayMonday = today.minusDays(today.dayOfWeek.value.toLong() - 1)
-                val pickedMonday = pickedDate.minusDays(pickedDate.dayOfWeek.value.toLong() - 1)
-
-                val weeksBetween = java.time.temporal.ChronoUnit.WEEKS.between(todayMonday, pickedMonday)
-                val targetPage = initialPage + weeksBetween.toInt()
-
-                // Прокручиваем пейджер к этой неделе
-                coroutineScope.launch {
-                    pagerState.scrollToPage(targetPage)
+                        showAddTaskSheet = false
+                    }
                 }
+            )
+        }
+
+        if (showDatePicker) {
+            CustomDatePickerDialog(
+                initialDate = selectedDate,
+                onDismiss = { showDatePicker = false },
+                onConfirm = { pickedDate ->
+                    selectedDate = pickedDate
+                    showDatePicker = false
+
+                    // ВЫЧИСЛЯЕМ ЦЕЛЕВУЮ СТРАНИЦУ ДЛЯ ПЕЙДЖЕРА
+                    // 1. Находим разницу в неделях между "сегодня" и выбранной датой
+                    val todayMonday = today.minusDays(today.dayOfWeek.value.toLong() - 1)
+                    val pickedMonday = pickedDate.minusDays(pickedDate.dayOfWeek.value.toLong() - 1)
+
+                    val weeksBetween = java.time.temporal.ChronoUnit.WEEKS.between(todayMonday, pickedMonday)
+                    val targetPage = initialPage + weeksBetween.toInt()
+
+                    // Прокручиваем пейджер к этой неделе
+                    coroutineScope.launch {
+                        pagerState.scrollToPage(targetPage)
+                    }
+                }
+            )
+        }
+    }
+//}
+
+fun getRemainingTimeText(deadlineMs: Long?): String? {if (deadlineMs == null || deadlineMs == 0L) return null
+    val diff = deadlineMs - System.currentTimeMillis()
+    if (diff <= 0) return "просрочено"
+
+    val days = diff / (1000 * 60 * 60 * 24)
+    val hours = (diff / (1000 * 60 * 60)) % 24
+    val minutes = (diff / (1000 * 60)) % 60
+
+    return when {
+        days > 0 -> "осталось $days дн $hours ч"
+        hours > 0 -> "осталось $hours ч $minutes мин"
+        else -> "осталось $minutes мин"
+    }
+}
+
+@Composable
+fun TaskItemView(
+    task: TaskEntity,
+    subtasks: List<SubTaskEntity>,
+    onToggleCompleted: (TaskEntity) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Transparent)
+            .padding(vertical = 8.dp)
+    ) {
+        // Ряд 1: Чекбокс + Название
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = if (task.is_completed == true) Icons.Default.Check else Icons.Default.Add, // Замените на нужную иконку круга
+                contentDescription = null,
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable { onToggleCompleted(task.copy(is_completed = !(task.is_completed ?: false))) },
+                tint = if (task.is_completed == true) Color.Gray else MaterialTheme.colorScheme.primary
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Text(
+                text = task.title,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium,
+                textDecoration = if (task.is_completed == true) TextDecoration.LineThrough else null,
+                color = if (task.is_completed == true) Color.Gray else MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        // Ряд 2: Плашки и Дедлайн (Смещение на 36dp = 24 иконка + 12 спейсер)
+        Row(
+            modifier = Modifier
+                .padding(start = 36.dp, top = 4.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                StatusTag(
+                    text = "важно",
+                    isActive = task.is_important == true,
+                    activeColor = Color.Red
+                )
+                StatusTag(
+                    text = "срочно",
+                    isActive = task.is_urgency == true,
+                    activeColor = Color(0xFFFFA500)
+                )
             }
+
+            getRemainingTimeText(task.deadline_date)?.let {
+                Text(
+                    text = it,
+                    fontSize = 11.sp,
+                    color = if (it == "просрочено") Color.Red else Color.Gray
+                )
+            }
+        }
+
+        // Ряд 3+: Подзадачи
+        subtasks.forEach { subtask ->
+            Row(
+                modifier = Modifier
+                    .padding(start = 36.dp, top = 6.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check, // Ваша иконка чекбокса подзадачи
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = if (subtask.is_completed) Color.Gray else MaterialTheme.colorScheme.secondary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = subtask.subtask_title ?: "",
+                    fontSize = 14.sp,
+                    color = if (subtask.is_completed) Color.Gray else MaterialTheme.colorScheme.onSurfaceVariant,
+                    textDecoration = if (subtask.is_completed) TextDecoration.LineThrough else null
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StatusTag(text: String, isActive: Boolean, activeColor: Color) {
+    Box(
+        modifier = Modifier
+            .border(
+                width = 0.5.dp,
+                color = if (isActive) activeColor else Color.LightGray.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(4.dp)
+            )
+            .padding(horizontal = 6.dp, vertical = 1.dp)
+    ) {
+        Text(
+            text = text,
+            fontSize = 10.sp,
+            color = if (isActive) activeColor else Color.LightGray.copy(alpha = 0.4f),
+            fontWeight = FontWeight.Normal
         )
     }
 }
@@ -238,7 +491,16 @@ fun TasksScreen() {
 @Composable
 fun AddTaskDialog(
     onDismiss: () -> Unit,
-    onTaskAdded: (String) -> Unit
+    onTaskAdded: (
+        title: String,
+        important: Boolean,
+        urgent: Boolean,
+        difficulty: Int,
+        subTasks: List<SubTask>,
+        deadline: LocalDateTime?,   // Добавлено
+        remind: LocalDateTime?,     // Добавлено
+        weekdays: Set<DayOfWeek>    // Добавлено
+    ) -> Unit
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -265,7 +527,16 @@ fun AddTaskDialog(
 @Composable
 fun AddTaskSheetContent(
     onDismiss: () -> Unit,
-    onTaskAdded: (String) -> Unit
+    onTaskAdded: (
+        title: String,
+        important: Boolean,
+        urgent: Boolean,
+        difficulty: Int,
+        subTasks: List<SubTask>,
+        deadline: LocalDateTime?,   // Добавлено
+        remind: LocalDateTime?,     // Добавлено
+        weekdays: Set<DayOfWeek>    // Добавлено
+    ) -> Unit
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
 //    val density = LocalDensity.current
@@ -275,6 +546,10 @@ fun AddTaskSheetContent(
     val focusRequester = remember { FocusRequester() }
 
     var showReminderDialog by remember { mutableStateOf(false) }
+    //
+    var deadlineDateTime by remember { mutableStateOf<LocalDateTime?>(null) }
+    var remindDateTime by remember { mutableStateOf<LocalDateTime?>(null) }
+    var selectedDays by remember { mutableStateOf<Set<DayOfWeek>>(emptySet()) }
 
     // Подзадачи
     var subTasks by remember { mutableStateOf(listOf<SubTask>()) }
@@ -312,7 +587,11 @@ fun AddTaskSheetContent(
                 targetValue = 1200f,
                 animationSpec = tween(durationMillis = 260, easing = FastOutLinearInEasing)
             )
-            pendingTask?.let { onTaskAdded(it) }
+            pendingTask?.let {
+                onTaskAdded(it
+                    , isImportant, isUrgent, difficulty, subTasks,
+                    deadlineDateTime, remindDateTime, selectedDays
+                )}
             onDismiss()
         }
     }
@@ -737,8 +1016,22 @@ fun AddTaskSheetContent(
                                     initialDate = LocalDate.now(), // или сохранённое значение
                                     initialTime = LocalTime.now().plusHours(1),
                                     onDismiss = { showReminderDialog = false },
-                                    onSave = { date, time, value, unit, weekdays ->
-                                        // сохраняем настройки
+                                    onSave = { date, time, remindValue, remindUnit, weekdays ->
+                                        // 1. Сохраняем дедлайн (дата + время)
+                                        val deadline = LocalDateTime.of(date, time)
+                                        deadlineDateTime = deadline
+
+                                        // 2. Сохраняем дни повтора
+                                        selectedDays = weekdays
+
+                                        // 3. Вычисляем время напоминания
+                                        remindDateTime = when (remindUnit) {
+                                            ReminderUnit.MINUTES -> deadline.minusMinutes(remindValue.toLong())
+                                            ReminderUnit.HOURS -> deadline.minusHours(remindValue.toLong())
+                                            ReminderUnit.DAYS -> deadline.minusDays(remindValue.toLong())
+                                            else -> deadline
+                                        }
+
                                         showReminderDialog = false
                                     }
                                 )

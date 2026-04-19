@@ -11,6 +11,8 @@ composeBom = "2026.03.01"
 appcompat = "1.7.1"
 material = "1.13.0"
 activity = "1.13.0"
+roomRuntime = "2.8.4"
+ksp = "2.2.20-2.0.4"
 uiautomator = "2.3.0"
 benchmarkMacroJunit4 = "1.2.4"
 benchmark-macro = "1.4.1"
@@ -24,6 +26,9 @@ coreI18n = "1.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "roomRuntime" }
+androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "roomRuntime" }
+androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "roomRuntime" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
@@ -57,4 +62,4 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 android-test = { id = "com.android.test", version.ref = "agp" }
 baselineprofile = { id = "androidx.baselineprofile", version.ref = "baselineprofile" }
-
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

@@ -44,7 +44,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen() {
     var selectedItem by remember { mutableIntStateOf(1) }
-    var showAddTaskSheet by remember { mutableStateOf(false) }
 
     val items = listOf("Цели", "Задачи", "Настройки")
     val icons = listOf(Icons.Filled.Star, Icons.Filled.List, Icons.Filled.Settings)
@@ -61,47 +60,17 @@ fun MainScreen() {
                     )
                 }
             }
-        },
-        floatingActionButton = {
-            if (selectedItem == 1) {
-                FloatingActionButton(
-                    onClick = { showAddTaskSheet = true },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.semantics { testTag = "add_task_fab" }
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
-                }
-            }
         }
     ) { innerPadding ->
-        // Основной контент экранов
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            color = MaterialTheme.colorScheme.background
-        ) {
+        Box(modifier = Modifier
+            .padding(innerPadding))
+        {
             when (selectedItem) {
                 0 -> GoalsScreen()
                 1 -> TasksScreen()
                 2 -> SettingsScreen()
             }
         }
-    }
-
-    // ВЫНОСИМ ОКНО ЗА ПРЕДЕЛЫ SCAFFOLD (чтобы перекрыть NavigationBar и FAB)
-    // Используем Box, который занимает ВЕСЬ экран поверх Scaffold
-    if (showAddTaskSheet) {
-        AddTaskDialog(
-            onDismiss = {
-                showAddTaskSheet = false
-            },
-            onTaskAdded = {
-                // Здесь обработайте добавление задачи
-                showAddTaskSheet = false
-            }
-        )
     }
 }
 
