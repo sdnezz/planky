@@ -58,7 +58,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -114,6 +114,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -137,6 +139,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
+import androidx.compose.ui.zIndex
 import androidx.core.i18n.DateTimeFormatter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -153,6 +156,14 @@ import kotlin.text.isNotBlank
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import kotlinx.coroutines.coroutineScope
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun TasksScreen() {
@@ -160,9 +171,6 @@ fun TasksScreen() {
     var showDatePicker by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val today = LocalDate.now()
-
-    // Создаем CoroutineScope для управления прокруткой пейджера
-    val coroutineScope = rememberCoroutineScope()
 
     // Параметры для "бесконечного" пейджера
     val initialPage = 5000
@@ -192,6 +200,29 @@ fun TasksScreen() {
     // Подписываемся на поток данных из БД
     val tasksFlow = remember(selectedDate) { taskDao.getTasksWithSubtasksForDay(startOfDay, endOfDay) }
     val tasksList by tasksFlow.collectAsState(initial = emptyList())
+
+    // Состояние для drag-and-drop
+    val coroutineScope = rememberCoroutineScope()
+    val lazyListState = rememberLazyListState()
+    val sortedTasks = tasksList.sortedBy { it.task.position }
+
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        // Этот колбэк вызывается, когда пользователь перетащил и отпустил элемент.
+        // `from` и `to` содержат индексы до и после перемещения.
+        coroutineScope.launch {
+            val updatedList = sortedTasks.toMutableList()
+            val moved = updatedList.removeAt(from.index)
+            updatedList.add(to.index, moved)
+
+            // Обновляем позиции в базе данных
+            updatedList.forEachIndexed { index, taskWithSubtasks ->
+                val newPos = index + 1
+                if (taskWithSubtasks.task.position != newPos) {
+                    taskDao.updateTask(taskWithSubtasks.task.copy(position = newPos))
+                }
+            }
+        }
+    }
 
         Column(
             modifier = Modifier
@@ -240,27 +271,33 @@ fun TasksScreen() {
             // Оборачиваем в Box LazyColumn и кнопку
             Box(modifier = Modifier.weight(1f)) {
                 LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 8.dp),
+                    state = lazyListState,
+                    modifier = Modifier.fillMaxSize().padding(top = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(tasksList) { item ->
-                        TaskItemView(
-                            task = item.task,
-                            subtasks = item.subtasks,
-                            onToggleCompleted = { updatedTask, updatedSubtasks ->
-                                coroutineScope.launch {
-                                    taskDao.updateTask(updatedTask)
-                                    updatedSubtasks.forEach { subtask ->
-                                        taskDao.updateSubTask(subtask)
-                                    }
-                                }
-                            },
-                            onSubtaskToggle = { updatedSubtask ->
-                                coroutineScope.launch {taskDao.updateSubTask(updatedSubtask) }
-                            }
-                        )
+                    items(sortedTasks, key = { it.task.id }) { item ->
+                        // 3. Оборачиваем каждый элемент в ReorderableItem
+                        ReorderableItem(
+                            state = reorderableState,
+                            key = item.task.id
+                        ) { isDragging ->
+                            // Этот лямбда-блок — содержимое вашего элемента задачи.
+                            // `isDragging` — это булево значение, которое становится `true`,
+                            // когда элемент тащат. Его можно использовать для анимаций.
+
+                            TaskItemView(
+                                task = item.task,
+                                subtasks = item.subtasks,
+                                onToggleCompleted = { updatedTask, updatedSubtasks ->
+                                    // ... (ваша логика завершения задачи)
+                                },
+                                onSubtaskToggle = { updatedSubtask ->
+                                    // ... (ваша логика для подзадач)
+                                },
+                                // Добавляем визуальный эффект при перетаскивании
+                                dragHandleModifier = with(this) { Modifier.draggableHandle() }
+                            )
+                        }
                     }
                 }
 
@@ -383,7 +420,9 @@ fun TaskItemView(
     task: TaskEntity,
     subtasks: List<SubTaskEntity>,
     onToggleCompleted: (TaskEntity, List<SubTaskEntity>) -> Unit,
-    onSubtaskToggle: (SubTaskEntity) -> Unit   // новый колбэк для подзадач
+    onSubtaskToggle: (SubTaskEntity) -> Unit,
+    modifier: Modifier = Modifier,
+    dragHandleModifier: Modifier = Modifier   // ← для ручки перетаскивания
 ) {
     var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
     val activeGreen = Color(0xFF4CAF50)
@@ -397,10 +436,11 @@ fun TaskItemView(
             currentTimeMs = System.currentTimeMillis()
         }
     }
+
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f), // фон задачи
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
         tonalElevation = 2.dp
     ) {
         Column(
@@ -409,18 +449,28 @@ fun TaskItemView(
                 .background(Color.Transparent)
                 .padding(horizontal = 8.dp, vertical = 8.dp)
         ) {
-            // Ряд 1: Чекбокс + Название
+            // Ряд 1: Иконка перетаскивания + Чекбокс + Название
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
+                // Ручка для перетаскивания (Drag Handle)
+                Icon(
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = "Перетащить",
+                    modifier = dragHandleModifier
+                        .size(24.dp)
+                        .padding(end = 8.dp),
+                    tint = Color.Gray
+                )
+
                 // Кастомный чекбокс для задачи
                 Box(
                     modifier = Modifier
                         .size(24.dp)
                         .background(
                             color = if (task.is_completed == true) activeGreen.copy(alpha = 0.1f)
-                                    else Color.Transparent,
+                            else Color.Transparent,
                             shape = CircleShape
                         )
                         .border(
@@ -464,7 +514,7 @@ fun TaskItemView(
                 )
             }
 
-            // Ряд 2: Плашки и Дедлайн
+            // Ряд 2: Плашки и Дедлайн (сдвиг с учётом иконки перетаскивания)
             Row(
                 modifier = Modifier
                     .padding(start = 36.dp, top = 4.dp)
@@ -503,14 +553,11 @@ fun TaskItemView(
                         .fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Кастомный чекбокс для подзадачи
                     Box(
                         modifier = Modifier
                             .size(18.dp)
                             .background(
-                                color = if (subtask.is_completed) activeGreen.copy(
-                                    alpha = 0.1f
-                                ) else Color.Transparent,
+                                color = if (subtask.is_completed) activeGreen.copy(alpha = 0.1f) else Color.Transparent,
                                 shape = CircleShape
                             )
                             .border(

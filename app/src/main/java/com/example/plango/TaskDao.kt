@@ -15,6 +15,14 @@ interface TaskDao {
     @Query("SELECT COUNT(*) FROM tasks WHERE date_of_task >= :startOfDay AND date_of_task <= :endOfDay")
     suspend fun getTaskCountForDay(startOfDay: Long, endOfDay: Long): Int
 
+    @Query("SELECT * FROM tasks WHERE date_of_task >= :startOfDay AND date_of_task <= :endOfDay ORDER BY position ASC")
+    suspend fun getTasksForDaySync(startOfDay: Long, endOfDay: Long): List<TaskEntity>
+
+    @Transaction
+    suspend fun updateTasksPositions(tasks: List<TaskEntity>) {
+        tasks.forEach { updateTask(it) }
+    }
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: TaskEntity): Long
 
