@@ -150,6 +150,9 @@ import java.time.format.TextStyle as DateTextStyle
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.text.isNotBlank
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
 
 @Composable
 fun TasksScreen() {
@@ -179,33 +182,17 @@ fun TasksScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
     val taskDao = db.taskDao()
-//
+
     // Получаем задачи для БД (в реальном приложении лучше через ViewModel)
     val startOfDay = selectedDate.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
     val endOfDay =
         selectedDate.atTime(java.time.LocalTime.MAX).atZone(java.time.ZoneOffset.UTC).toInstant()
             .toEpochMilli()
-//
-//    // Подписываемся на поток данных из БД
-    val tasksFlow =
-        remember(selectedDate) { taskDao.getTasksWithSubtasksForDay(startOfDay, endOfDay) }
+
+    // Подписываемся на поток данных из БД
+    val tasksFlow = remember(selectedDate) { taskDao.getTasksWithSubtasksForDay(startOfDay, endOfDay) }
     val tasksList by tasksFlow.collectAsState(initial = emptyList())
 
-    // 2. Добавляем Scaffold для TasksScreen
-//    Scaffold(
-//        floatingActionButton = {
-//            FloatingActionButton(
-//                onClick = { showAddTaskSheet = true },
-//                containerColor = MaterialTheme.colorScheme.primary,
-//                shape = RoundedCornerShape(16.dp)
-//            ) {
-//                Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
-//            }
-//        },
-//        // Фон делаем прозрачным, чтобы не перекрывать фон MainScreen если нужно
-//        containerColor = Color.Transparent
-//    ) { paddingValues ->
-        // 3. Весь основной контент Column оборачиваем в Box/Column с учетом paddingValues
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -250,7 +237,7 @@ fun TasksScreen() {
                 color = Color.Gray
             )
 
-            // Оборачиваем в Box только LazyColumn и кнопку
+            // Оборачиваем в Box LazyColumn и кнопку
             Box(modifier = Modifier.weight(1f)) {
                 LazyColumn(
                     modifier = Modifier
@@ -262,8 +249,16 @@ fun TasksScreen() {
                         TaskItemView(
                             task = item.task,
                             subtasks = item.subtasks,
-                            onToggleCompleted = { updatedTask ->
-                                coroutineScope.launch { taskDao.updateTask(updatedTask) }
+                            onToggleCompleted = { updatedTask, updatedSubtasks ->
+                                coroutineScope.launch {
+                                    taskDao.updateTask(updatedTask)
+                                    updatedSubtasks.forEach { subtask ->
+                                        taskDao.updateSubTask(subtask)
+                                    }
+                                }
+                            },
+                            onSubtaskToggle = { updatedSubtask ->
+                                coroutineScope.launch {taskDao.updateSubTask(updatedSubtask) }
                             }
                         )
                     }
@@ -290,15 +285,22 @@ fun TasksScreen() {
                 onTaskAdded = {
                               title, important, urgent, diff, subTasksList, deadline, remind, weekdays ->
                     coroutineScope.launch {
+                        val startOfDay = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+                        val endOfDay = selectedDate.atTime(LocalTime.MAX).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+
+                        // Получаем количество задач на выбранный день
+                        val count = taskDao.getTaskCountForDay(startOfDay, endOfDay)
+                        val position = count + 1
                         // 1. Создаем основную задачу
                         val newTask = TaskEntity(
                             title = title,
                             date_of_task = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+                            position = position,
                             is_important = important,
                             is_urgency = urgent,
                             difficulty = if (diff == 0) 1 else diff,
                             is_completed = false,
-                            deadline_date = deadline?.toInstant(ZoneOffset.UTC)?.toEpochMilli(),
+                            deadline_date = deadline?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
                             remind_date = remind?.toInstant(ZoneOffset.UTC)?.toEpochMilli(),
                             repeat_mon = weekdays.contains(DayOfWeek.MONDAY),
                             repeat_tue = weekdays.contains(DayOfWeek.TUESDAY),
@@ -316,16 +318,16 @@ fun TasksScreen() {
                         subTasksList.forEach { subTaskData ->
                             val subTaskText = subTaskData.textValue.text.trim()
                             // Проверяем на пустую строку (добавлен безопасный вызов ?. и импорт выше)
-                            if (!subTaskData.textValue.text.isNotBlank()) {
-                                taskDao.insertSubTask(
-                                    SubTaskEntity(
-                                        task_id = taskId.toInt(),
-                                        subtask_title = subTaskText,
-                                        is_completed = subTaskData.isDone
+//                            if (subTaskData.textValue.text.isNotBlank()) {
+                            taskDao.insertSubTask(
+                                SubTaskEntity(
+                                    task_id = taskId.toInt(),
+                                    subtask_title = subTaskText,
+                                    is_completed = subTaskData.isDone
                                     )
                                 )
                             }
-                        }
+
 
                         showAddTaskSheet = false
                     }
@@ -359,8 +361,10 @@ fun TasksScreen() {
     }
 //}
 
-fun getRemainingTimeText(deadlineMs: Long?): String? {if (deadlineMs == null || deadlineMs == 0L) return null
-    val diff = deadlineMs - System.currentTimeMillis()
+
+fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
+    if (deadlineMs == null || deadlineMs == 0L) return null
+    val diff = deadlineMs - currentTimeMs
     if (diff <= 0) return "просрочено"
 
     val days = diff / (1000 * 60 * 60 * 24)
@@ -378,102 +382,185 @@ fun getRemainingTimeText(deadlineMs: Long?): String? {if (deadlineMs == null || 
 fun TaskItemView(
     task: TaskEntity,
     subtasks: List<SubTaskEntity>,
-    onToggleCompleted: (TaskEntity) -> Unit
+    onToggleCompleted: (TaskEntity, List<SubTaskEntity>) -> Unit,
+    onSubtaskToggle: (SubTaskEntity) -> Unit   // новый колбэк для подзадач
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.Transparent)
-            .padding(vertical = 8.dp)
+    var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    val activeGreen = Color(0xFF4CAF50)
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            val seconds = (now / 1000) % 60
+            val millisToNextMinute = ((60 - seconds) * 1000) - (now % 1000)
+            delay(millisToNextMinute)
+            currentTimeMs = System.currentTimeMillis()
+        }
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f), // фон задачи
+        tonalElevation = 2.dp
     ) {
-        // Ряд 1: Чекбокс + Название
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                imageVector = if (task.is_completed == true) Icons.Default.Check else Icons.Default.Add, // Замените на нужную иконку круга
-                contentDescription = null,
-                modifier = Modifier
-                    .size(24.dp)
-                    .clickable { onToggleCompleted(task.copy(is_completed = !(task.is_completed ?: false))) },
-                tint = if (task.is_completed == true) Color.Gray else MaterialTheme.colorScheme.primary
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Text(
-                text = task.title,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Medium,
-                textDecoration = if (task.is_completed == true) TextDecoration.LineThrough else null,
-                color = if (task.is_completed == true) Color.Gray else MaterialTheme.colorScheme.onBackground
-            )
-        }
-
-        // Ряд 2: Плашки и Дедлайн (Смещение на 36dp = 24 иконка + 12 спейсер)
-        Row(
+        Column(
             modifier = Modifier
-                .padding(start = 36.dp, top = 4.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .fillMaxWidth()
+                .background(Color.Transparent)
+                .padding(horizontal = 8.dp, vertical = 8.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusTag(
-                    text = "важно",
-                    isActive = task.is_important == true,
-                    activeColor = Color.Red
-                )
-                StatusTag(
-                    text = "срочно",
-                    isActive = task.is_urgency == true,
-                    activeColor = Color(0xFFFFA500)
-                )
-            }
+            // Ряд 1: Чекбокс + Название
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Кастомный чекбокс для задачи
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(
+                            color = if (task.is_completed == true) activeGreen.copy(alpha = 0.1f)
+                                    else Color.Transparent,
+                            shape = CircleShape
+                        )
+                        .border(
+                            2.dp,
+                            if (task.is_completed == true) activeGreen else Color.LightGray,
+                            CircleShape
+                        )
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            val newCompleted = !(task.is_completed ?: false)
+                            val updatedTask = task.copy(is_completed = newCompleted)
+                            val updatedSubtasks = if (newCompleted) {
+                                subtasks.map { it.copy(is_completed = true) }
+                            } else {
+                                subtasks
+                            }
+                            onToggleCompleted(updatedTask, updatedSubtasks)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (task.is_completed == true) {
+                        Icon(
+                            Icons.Default.Check,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = activeGreen
+                        )
+                    }
+                }
 
-            getRemainingTimeText(task.deadline_date)?.let {
+                Spacer(modifier = Modifier.width(12.dp))
+
                 Text(
-                    text = it,
-                    fontSize = 11.sp,
-                    color = if (it == "просрочено") Color.Red else Color.Gray
+                    text = task.title,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    textDecoration = if (task.is_completed == true) TextDecoration.LineThrough else null,
+                    color = if (task.is_completed == true) activeGreen else MaterialTheme.colorScheme.onBackground
                 )
             }
-        }
 
-        // Ряд 3+: Подзадачи
-        subtasks.forEach { subtask ->
+            // Ряд 2: Плашки и Дедлайн
             Row(
                 modifier = Modifier
-                    .padding(start = 36.dp, top = 6.dp)
+                    .padding(start = 36.dp, top = 4.dp)
                     .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = Icons.Default.Check, // Ваша иконка чекбокса подзадачи
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = if (subtask.is_completed) Color.Gray else MaterialTheme.colorScheme.secondary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = subtask.subtask_title ?: "",
-                    fontSize = 14.sp,
-                    color = if (subtask.is_completed) Color.Gray else MaterialTheme.colorScheme.onSurfaceVariant,
-                    textDecoration = if (subtask.is_completed) TextDecoration.LineThrough else null
-                )
+                val tags = buildList {
+                    if (task.is_important == true) add("важно" to Color.Red)
+                    if (task.is_urgency == true) add("срочно" to Color(0xFFFFA500))
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    tags.forEach { (text, color) ->
+                        StatusTag(
+                            text = text,
+                            color = color
+                        )
+                    }
+                }
+
+                getRemainingTimeText(task.deadline_date, currentTimeMs)?.let {
+                    Text(
+                        text = it,
+                        fontSize = 11.sp,
+                        color = if (it == "просрочено") Color.Red else Color.Gray
+                    )
+                }
+            }
+
+            // Ряд 3+: Подзадачи
+            subtasks.forEach { subtask ->
+                Row(
+                    modifier = Modifier
+                        .padding(start = 36.dp, top = 6.dp)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Кастомный чекбокс для подзадачи
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .background(
+                                color = if (subtask.is_completed) activeGreen.copy(
+                                    alpha = 0.1f
+                                ) else Color.Transparent,
+                                shape = CircleShape
+                            )
+                            .border(
+                                1.5.dp,
+                                if (subtask.is_completed) activeGreen else Color.LightGray,
+                                CircleShape
+                            )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                onSubtaskToggle(subtask.copy(is_completed = !subtask.is_completed))
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (subtask.is_completed) {
+                            Icon(
+                                Icons.Default.Check,
+                                null,
+                                modifier = Modifier.size(12.dp),
+                                tint = activeGreen
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Text(
+                        text = subtask.subtask_title ?: "",
+                        fontSize = 14.sp,
+                        color = if (subtask.is_completed) activeGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textDecoration = if (subtask.is_completed) TextDecoration.LineThrough else null
+                    )
+                }
             }
         }
     }
 }
 
+//шрифт sanfransicso
 @Composable
-fun StatusTag(text: String, isActive: Boolean, activeColor: Color) {
+fun StatusTag(
+    text: String,
+    color: Color
+) {
     Box(
         modifier = Modifier
             .border(
                 width = 0.5.dp,
-                color = if (isActive) activeColor else Color.LightGray.copy(alpha = 0.4f),
+                color = color,
                 shape = RoundedCornerShape(4.dp)
             )
             .padding(horizontal = 6.dp, vertical = 1.dp)
@@ -481,7 +568,7 @@ fun StatusTag(text: String, isActive: Boolean, activeColor: Color) {
         Text(
             text = text,
             fontSize = 10.sp,
-            color = if (isActive) activeColor else Color.LightGray.copy(alpha = 0.4f),
+            color = color,
             fontWeight = FontWeight.Normal
         )
     }

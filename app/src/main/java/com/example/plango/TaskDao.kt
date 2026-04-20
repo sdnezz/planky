@@ -12,11 +12,16 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE date_of_task >= :startOfDay AND date_of_task <= :endOfDay")
     fun getTasksWithSubtasksForDay(startOfDay: Long, endOfDay: Long): Flow<List<TaskWithSubtasks>>
 
+    @Query("SELECT COUNT(*) FROM tasks WHERE date_of_task >= :startOfDay AND date_of_task <= :endOfDay")
+    suspend fun getTaskCountForDay(startOfDay: Long, endOfDay: Long): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: TaskEntity): Long
 
     @Update
     suspend fun updateTask(task: TaskEntity)
+    @Update
+    suspend fun updateSubTask(subtask: SubTaskEntity)
 
     @Delete
     suspend fun deleteTask(task: TaskEntity)

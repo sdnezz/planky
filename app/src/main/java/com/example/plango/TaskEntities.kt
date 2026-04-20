@@ -10,6 +10,7 @@ data class TaskEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val title: String,
     val date_of_task: Long,
+    val position: Int = 0,
     val cover: Int? = null,
     val is_important: Boolean? = false,
     val is_urgency: Boolean? = false,
@@ -24,7 +25,7 @@ data class TaskEntity(
     val repeat_thu: Boolean = false,
     val repeat_fri: Boolean = false,
     val repeat_sat: Boolean = false,
-    val repeat_sun: Boolean = false
+    val repeat_sun: Boolean = false,
 )
 
 @Entity(
