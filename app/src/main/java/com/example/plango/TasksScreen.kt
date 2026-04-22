@@ -157,13 +157,18 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.geometry.Offset
-import kotlinx.coroutines.coroutineScope
+import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.runtime.mutableStateListOf
+//import com.mohamedrejeb.compose.dnd.*
+//import com.mohamedrejeb.compose.dnd.annotation.ExperimentalDndApi
+//import com.mohamedrejeb.compose.dnd.reorder.ReorderContainer
+//import com.mohamedrejeb.compose.dnd.reorder.ReorderableItem
+//import com.mohamedrejeb.compose.dnd.reorder.rememberReorderState
+import kotlinx.collections.immutable.toImmutableList
+import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+
 
 @Composable
 fun TasksScreen() {
@@ -171,6 +176,9 @@ fun TasksScreen() {
     var showDatePicker by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val today = LocalDate.now()
+
+    // Создаем CoroutineScope для управления прокруткой пейджера
+    val coroutineScope = rememberCoroutineScope()
 
     // Параметры для "бесконечного" пейджера
     val initialPage = 5000
@@ -201,203 +209,212 @@ fun TasksScreen() {
     val tasksFlow = remember(selectedDate) { taskDao.getTasksWithSubtasksForDay(startOfDay, endOfDay) }
     val tasksList by tasksFlow.collectAsState(initial = emptyList())
 
-    // Состояние для drag-and-drop
-    val coroutineScope = rememberCoroutineScope()
+    var orderedTasks by remember(selectedDate, tasksList) {
+        mutableStateOf(tasksList.sortedBy { it.task.position })
+    }
+    val hapticFeedback = LocalHapticFeedback.current
     val lazyListState = rememberLazyListState()
-    val sortedTasks = tasksList.sortedBy { it.task.position }
 
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        // Этот колбэк вызывается, когда пользователь перетащил и отпустил элемент.
-        // `from` и `to` содержат индексы до и после перемещения.
-        coroutineScope.launch {
-            val updatedList = sortedTasks.toMutableList()
-            val moved = updatedList.removeAt(from.index)
-            updatedList.add(to.index, moved)
 
-            // Обновляем позиции в базе данных
-            updatedList.forEachIndexed { index, taskWithSubtasks ->
-                val newPos = index + 1
-                if (taskWithSubtasks.task.position != newPos) {
-                    taskDao.updateTask(taskWithSubtasks.task.copy(position = newPos))
-                }
-            }
+    val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        // Эта лямбда вызывается при каждом сдвиге элемента во время drag
+        // tasksList должен быть mutableStateOf, чтобы UI реагировал
+        orderedTasks = orderedTasks.toMutableList().apply {
+            add(to.index, removeAt(from.index))
         }
+        // Опционально: haptic feedback при перестановке
+        hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = displayedMonthText,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                IconButton(onClick = { showDatePicker = true }) {
-                    Icon(imageVector = Icons.Default.DateRange, contentDescription = "Календарь")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            CalendarWeekPager(
-                pagerState = pagerState,
-                initialPage = initialPage,
-                selectedDate = selectedDate,
-                onDateSelected = { selectedDate = it }
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
             Text(
-                text = if (selectedDate == today) "Задачи на сегодня"
-                else "Задачи на ${selectedDate.dayOfMonth} ${
-                    selectedDate.month.getDisplayName(
-                        DateTextStyle.FULL,
-                        Locale("ru")
-                    )
-                }",
-                fontWeight = FontWeight.Medium,
-                color = Color.Gray
+                text = displayedMonthText,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
             )
+            IconButton(onClick = { showDatePicker = true }) {
+                Icon(imageVector = Icons.Default.DateRange, contentDescription = "Календарь")
+            }
+        }
 
-            // Оборачиваем в Box LazyColumn и кнопку
-            Box(modifier = Modifier.weight(1f)) {
-                LazyColumn(
-                    state = lazyListState,
-                    modifier = Modifier.fillMaxSize().padding(top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items(sortedTasks, key = { it.task.id }) { item ->
-                        // 3. Оборачиваем каждый элемент в ReorderableItem
-                        ReorderableItem(
-                            state = reorderableState,
-                            key = item.task.id
-                        ) { isDragging ->
-                            // Этот лямбда-блок — содержимое вашего элемента задачи.
-                            // `isDragging` — это булево значение, которое становится `true`,
-                            // когда элемент тащат. Его можно использовать для анимаций.
+        Spacer(modifier = Modifier.height(16.dp))
 
+        CalendarWeekPager(
+            pagerState = pagerState,
+            initialPage = initialPage,
+            selectedDate = selectedDate,
+            onDateSelected = { selectedDate = it }
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = if (selectedDate == today) "Задачи на сегодня"
+            else "Задачи на ${selectedDate.dayOfMonth} ${
+                selectedDate.month.getDisplayName(
+                    DateTextStyle.FULL,
+                    Locale("ru")
+                )
+            }",
+            fontWeight = FontWeight.Medium,
+            color = Color.Gray
+        )
+
+        // Оборачиваем в Box LazyColumn и кнопку
+        Box(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 8.dp),
+                state = lazyListState, // 3. Передаём state в LazyColumn
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // 4. items() обязательно должен иметь стабильный key
+                items(orderedTasks, key = { it.task.id }) { item ->
+
+                    // 5. Оборачиваем каждый элемент в ReorderableItem
+                    ReorderableItem(reorderableLazyListState, key = item.task.id) { isDragging ->
+
+                        // isDragging можно использовать для визуального эффекта (тень и т.д.)
+                        val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp)
+
+                        Surface(shadowElevation = elevation) {
+                            // 6. Передаём scope (this) в TaskItemView, чтобы можно было
+                            //    применить Modifier.draggableHandle() внутри него
                             TaskItemView(
                                 task = item.task,
                                 subtasks = item.subtasks,
+                                reorderScope = this,
+                                onDragStopped = {
+                                    // orderedTasks к этому моменту уже обновлён библиотекой
+                                    coroutineScope.launch {
+                                        orderedTasks.forEachIndexed { index, taskWithSubtasks ->
+                                            taskDao.updateTask(
+                                                taskWithSubtasks.task.copy(position = index + 1)
+                                            )
+                                        }
+                                    }
+                                },
                                 onToggleCompleted = { updatedTask, updatedSubtasks ->
-                                    // ... (ваша логика завершения задачи)
+                                    coroutineScope.launch {
+                                        taskDao.updateTask(updatedTask)
+                                        updatedSubtasks.forEach { taskDao.updateSubTask(it) }
+                                    }
                                 },
                                 onSubtaskToggle = { updatedSubtask ->
-                                    // ... (ваша логика для подзадач)
-                                },
-                                // Добавляем визуальный эффект при перетаскивании
-                                dragHandleModifier = with(this) { Modifier.draggableHandle() }
+                                    coroutineScope.launch { taskDao.updateSubTask(updatedSubtask) }
+                                }
                             )
                         }
                     }
                 }
+            }
 
-                // Кнопка справа внизу поверх списка
-                FloatingActionButton(
-                    onClick = { showAddTaskSheet = true },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(36.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 16.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
-                }
+
+            // Кнопка справа внизу поверх списка
+            FloatingActionButton(
+                onClick = { showAddTaskSheet = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(36.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 16.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
             }
         }
-
-
-        if (showAddTaskSheet) {
-            AddTaskDialog(
-                onDismiss = { showAddTaskSheet = false },
-                onTaskAdded = {
-                              title, important, urgent, diff, subTasksList, deadline, remind, weekdays ->
-                    coroutineScope.launch {
-                        val startOfDay = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
-                        val endOfDay = selectedDate.atTime(LocalTime.MAX).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
-
-                        // Получаем количество задач на выбранный день
-                        val count = taskDao.getTaskCountForDay(startOfDay, endOfDay)
-                        val position = count + 1
-                        // 1. Создаем основную задачу
-                        val newTask = TaskEntity(
-                            title = title,
-                            date_of_task = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-                            position = position,
-                            is_important = important,
-                            is_urgency = urgent,
-                            difficulty = if (diff == 0) 1 else diff,
-                            is_completed = false,
-                            deadline_date = deadline?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
-                            remind_date = remind?.toInstant(ZoneOffset.UTC)?.toEpochMilli(),
-                            repeat_mon = weekdays.contains(DayOfWeek.MONDAY),
-                            repeat_tue = weekdays.contains(DayOfWeek.TUESDAY),
-                            repeat_wed = weekdays.contains(DayOfWeek.WEDNESDAY),
-                            repeat_thu = weekdays.contains(DayOfWeek.THURSDAY),
-                            repeat_fri = weekdays.contains(DayOfWeek.FRIDAY),
-                            repeat_sat = weekdays.contains(DayOfWeek.SATURDAY),
-                            repeat_sun = weekdays.contains(DayOfWeek.SUNDAY)
-                        )
-
-                        // 2. Вставляем задачу и получаем её ID
-                        val taskId = taskDao.insertTask(newTask)
-
-                        // 3. Сохраняем подзадачи, привязывая их к taskId
-                        subTasksList.forEach { subTaskData ->
-                            val subTaskText = subTaskData.textValue.text.trim()
-                            // Проверяем на пустую строку (добавлен безопасный вызов ?. и импорт выше)
-//                            if (subTaskData.textValue.text.isNotBlank()) {
-                            taskDao.insertSubTask(
-                                SubTaskEntity(
-                                    task_id = taskId.toInt(),
-                                    subtask_title = subTaskText,
-                                    is_completed = subTaskData.isDone
-                                    )
-                                )
-                            }
-
-
-                        showAddTaskSheet = false
-                    }
-                }
-            )
-        }
-
-        if (showDatePicker) {
-            CustomDatePickerDialog(
-                initialDate = selectedDate,
-                onDismiss = { showDatePicker = false },
-                onConfirm = { pickedDate ->
-                    selectedDate = pickedDate
-                    showDatePicker = false
-
-                    // ВЫЧИСЛЯЕМ ЦЕЛЕВУЮ СТРАНИЦУ ДЛЯ ПЕЙДЖЕРА
-                    // 1. Находим разницу в неделях между "сегодня" и выбранной датой
-                    val todayMonday = today.minusDays(today.dayOfWeek.value.toLong() - 1)
-                    val pickedMonday = pickedDate.minusDays(pickedDate.dayOfWeek.value.toLong() - 1)
-
-                    val weeksBetween = java.time.temporal.ChronoUnit.WEEKS.between(todayMonday, pickedMonday)
-                    val targetPage = initialPage + weeksBetween.toInt()
-
-                    // Прокручиваем пейджер к этой неделе
-                    coroutineScope.launch {
-                        pagerState.scrollToPage(targetPage)
-                    }
-                }
-            )
-        }
     }
-//}
 
+    if (showAddTaskSheet) {
+        AddTaskDialog(
+            onDismiss = { showAddTaskSheet = false },
+            onTaskAdded = {
+                    title, important, urgent, diff, subTasksList, deadline, remind, weekdays ->
+                coroutineScope.launch {
+                    val startOfDay = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+                    val endOfDay = selectedDate.atTime(LocalTime.MAX).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+
+                    // Получаем количество задач на выбранный день
+                    val count = taskDao.getTaskCountForDay(startOfDay, endOfDay)
+                    val position = count + 1
+                    // 1. Создаем основную задачу
+                    val newTask = TaskEntity(
+                        title = title,
+                        date_of_task = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+                        position = position,
+                        is_important = important,
+                        is_urgency = urgent,
+                        difficulty = if (diff == 0) 1 else diff,
+                        is_completed = false,
+                        deadline_date = deadline?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
+                        remind_date = remind?.toInstant(ZoneOffset.UTC)?.toEpochMilli(),
+                        repeat_mon = weekdays.contains(DayOfWeek.MONDAY),
+                        repeat_tue = weekdays.contains(DayOfWeek.TUESDAY),
+                        repeat_wed = weekdays.contains(DayOfWeek.WEDNESDAY),
+                        repeat_thu = weekdays.contains(DayOfWeek.THURSDAY),
+                        repeat_fri = weekdays.contains(DayOfWeek.FRIDAY),
+                        repeat_sat = weekdays.contains(DayOfWeek.SATURDAY),
+                        repeat_sun = weekdays.contains(DayOfWeek.SUNDAY)
+                    )
+
+                    // 2. Вставляем задачу и получаем её ID
+                    val taskId = taskDao.insertTask(newTask)
+
+                    // 3. Сохраняем подзадачи, привязывая их к taskId
+                    subTasksList.forEach { subTaskData ->
+                        val subTaskText = subTaskData.textValue.text.trim()
+                        // Проверяем на пустую строку (добавлен безопасный вызов ?. и импорт выше)
+//                            if (subTaskData.textValue.text.isNotBlank()) {
+                        taskDao.insertSubTask(
+                            SubTaskEntity(
+                                task_id = taskId.toInt(),
+                                subtask_title = subTaskText,
+                                is_completed = subTaskData.isDone
+                            )
+                        )
+                    }
+
+                    showAddTaskSheet = false
+                }
+            }
+        )
+    }
+
+    if (showDatePicker) {
+        CustomDatePickerDialog(
+            initialDate = selectedDate,
+            onDismiss = { showDatePicker = false },
+            onConfirm = { pickedDate ->
+                selectedDate = pickedDate
+                showDatePicker = false
+
+                // ВЫЧИСЛЯЕМ ЦЕЛЕВУЮ СТРАНИЦУ ДЛЯ ПЕЙДЖЕРА
+                // 1. Находим разницу в неделях между "сегодня" и выбранной датой
+                val todayMonday = today.minusDays(today.dayOfWeek.value.toLong() - 1)
+                val pickedMonday = pickedDate.minusDays(pickedDate.dayOfWeek.value.toLong() - 1)
+
+                val weeksBetween = java.time.temporal.ChronoUnit.WEEKS.between(todayMonday, pickedMonday)
+                val targetPage = initialPage + weeksBetween.toInt()
+
+                // Прокручиваем пейджер к этой неделе
+                coroutineScope.launch {
+                    pagerState.scrollToPage(targetPage)
+                }
+            }
+        )
+    }
+}
+//}
 
 fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
     if (deadlineMs == null || deadlineMs == 0L) return null
@@ -419,10 +436,10 @@ fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
 fun TaskItemView(
     task: TaskEntity,
     subtasks: List<SubTaskEntity>,
+    reorderScope: ReorderableCollectionItemScope,
     onToggleCompleted: (TaskEntity, List<SubTaskEntity>) -> Unit,
     onSubtaskToggle: (SubTaskEntity) -> Unit,
-    modifier: Modifier = Modifier,
-    dragHandleModifier: Modifier = Modifier   // ← для ручки перетаскивания
+    onDragStopped: () -> Unit// новый колбэк для подзадач
 ) {
     var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
     val activeGreen = Color(0xFF4CAF50)
@@ -436,11 +453,10 @@ fun TaskItemView(
             currentTimeMs = System.currentTimeMillis()
         }
     }
-
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f), // фон задачи
         tonalElevation = 2.dp
     ) {
         Column(
@@ -448,22 +464,13 @@ fun TaskItemView(
                 .fillMaxWidth()
                 .background(Color.Transparent)
                 .padding(horizontal = 8.dp, vertical = 8.dp)
+
         ) {
-            // Ряд 1: Иконка перетаскивания + Чекбокс + Название
+            // Ряд 1: Чекбокс + Название
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Ручка для перетаскивания (Drag Handle)
-                Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = "Перетащить",
-                    modifier = dragHandleModifier
-                        .size(24.dp)
-                        .padding(end = 8.dp),
-                    tint = Color.Gray
-                )
-
                 // Кастомный чекбокс для задачи
                 Box(
                     modifier = Modifier
@@ -505,6 +512,7 @@ fun TaskItemView(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
+
                 Text(
                     text = task.title,
                     fontSize = 17.sp,
@@ -512,9 +520,23 @@ fun TaskItemView(
                     textDecoration = if (task.is_completed == true) TextDecoration.LineThrough else null,
                     color = if (task.is_completed == true) activeGreen else MaterialTheme.colorScheme.onBackground
                 )
+                Spacer(Modifier.weight(1f))
+
+                Icon(
+                    imageVector = Icons.Rounded.Menu,
+                    contentDescription = "Переместить",
+                    tint = Color.LightGray,
+                    modifier = with(reorderScope) {
+                        Modifier.draggableHandle(
+                            onDragStopped = { onDragStopped() }
+                        )
+                    }
+                )
             }
 
-            // Ряд 2: Плашки и Дедлайн (сдвиг с учётом иконки перетаскивания)
+
+            // Ряд 2: Плашки и Дедлайн
+
             Row(
                 modifier = Modifier
                     .padding(start = 36.dp, top = 4.dp)
@@ -553,11 +575,14 @@ fun TaskItemView(
                         .fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Кастомный чекбокс для подзадачи
                     Box(
                         modifier = Modifier
                             .size(18.dp)
                             .background(
-                                color = if (subtask.is_completed) activeGreen.copy(alpha = 0.1f) else Color.Transparent,
+                                color = if (subtask.is_completed) activeGreen.copy(
+                                    alpha = 0.1f
+                                ) else Color.Transparent,
                                 shape = CircleShape
                             )
                             .border(

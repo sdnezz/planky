@@ -86,4 +86,6 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp("androidx.room:room-compiler:2.8.4")
     implementation("sh.calvin.reorderable:reorderable:3.0.0")
+    implementation(libs.kotlinx.collections.immutable)
+//    implementation(libs.compose.dnd)
 }

@@ -18,9 +18,78 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE date_of_task >= :startOfDay AND date_of_task <= :endOfDay ORDER BY position ASC")
     suspend fun getTasksForDaySync(startOfDay: Long, endOfDay: Long): List<TaskEntity>
 
+//    @Transaction
+//    suspend fun updateTasksPositions(tasks: List<TaskEntity>) {
+//        tasks.forEach { updateTask(it) }
+//    }
+@Query("""
+        UPDATE tasks 
+        SET position = position - 1 
+        WHERE date_of_task BETWEEN :start AND :end
+        AND position > :fromPosition 
+        AND position <= :toPosition
+    """)
+suspend fun shiftUp(
+    start: Long,
+    end: Long,
+    fromPosition: Int,
+    toPosition: Int
+)
+
+    @Query("""
+        UPDATE tasks 
+        SET position = position + 1 
+        WHERE date_of_task BETWEEN :start AND :end
+        AND position >= :toPosition 
+        AND position < :fromPosition
+    """)
+    suspend fun shiftDown(
+        start: Long,
+        end: Long,
+        fromPosition: Int,
+        toPosition: Int
+    )
+
+    @Query("""
+        UPDATE tasks 
+        SET position = :newPosition 
+        WHERE id = :taskId
+    """)
+    suspend fun updateTaskPosition(taskId: Int, newPosition: Int)
+
     @Transaction
-    suspend fun updateTasksPositions(tasks: List<TaskEntity>) {
-        tasks.forEach { updateTask(it) }
+    suspend fun updatePositionsOnReorder(
+        oldItem: TaskEntity,
+        newIndex: Int,
+        tasks: List<TaskWithSubtasks>
+    ) {
+        val fromPosition = oldItem.position ?: return
+        val toPosition = newIndex + 1
+
+        if (fromPosition == toPosition) return
+
+        val start = tasks.first().task.date_of_task
+        val end = tasks.first().task.date_of_task
+
+        if (fromPosition < toPosition) {
+            // Перетаскивание вниз
+            shiftUp(
+                start = start,
+                end = end,
+                fromPosition = fromPosition,
+                toPosition = toPosition
+            )
+        } else {
+            // Перетаскивание вверх
+            shiftDown(
+                start = start,
+                end = end,
+                fromPosition = fromPosition,
+                toPosition = toPosition
+            )
+        }
+
+        updateTaskPosition(oldItem.id, toPosition)
     }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
