@@ -18,23 +18,19 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE date_of_task >= :startOfDay AND date_of_task <= :endOfDay ORDER BY position ASC")
     suspend fun getTasksForDaySync(startOfDay: Long, endOfDay: Long): List<TaskEntity>
 
-//    @Transaction
-//    suspend fun updateTasksPositions(tasks: List<TaskEntity>) {
-//        tasks.forEach { updateTask(it) }
-//    }
-@Query("""
-        UPDATE tasks 
-        SET position = position - 1 
-        WHERE date_of_task BETWEEN :start AND :end
-        AND position > :fromPosition 
-        AND position <= :toPosition
-    """)
-suspend fun shiftUp(
-    start: Long,
-    end: Long,
-    fromPosition: Int,
-    toPosition: Int
-)
+    @Query("""
+            UPDATE tasks 
+            SET position = position - 1 
+            WHERE date_of_task BETWEEN :start AND :end
+            AND position > :fromPosition 
+            AND position <= :toPosition
+        """)
+    suspend fun shiftUp(
+        start: Long,
+        end: Long,
+        fromPosition: Int,
+        toPosition: Int
+    )
 
     @Query("""
         UPDATE tasks 
@@ -109,6 +105,19 @@ suspend fun shiftUp(
 
     @Query("SELECT * FROM subtasks WHERE task_id = :taskId")
     suspend fun getSubTasksForTask(taskId: Int): List<SubTaskEntity>
+
+    @Query("DELETE FROM subtasks WHERE task_id = :taskId")
+    suspend fun deleteSubTasksForTask(taskId: Int)
+
+    @Transaction
+    suspend fun updateTaskWithSubtasks(
+        task: TaskEntity,
+        subtasks: List<SubTaskEntity>
+    ) {
+        updateTask(task)
+        deleteSubTasksForTask(task.id)
+        subtasks.forEach { insertSubTask(it) }
+    }
 }
 
 data class TaskWithSubtasks(

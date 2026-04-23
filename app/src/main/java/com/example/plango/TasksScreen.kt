@@ -159,11 +159,6 @@ import java.time.ZoneId
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.runtime.mutableStateListOf
-//import com.mohamedrejeb.compose.dnd.*
-//import com.mohamedrejeb.compose.dnd.annotation.ExperimentalDndApi
-//import com.mohamedrejeb.compose.dnd.reorder.ReorderContainer
-//import com.mohamedrejeb.compose.dnd.reorder.ReorderableItem
-//import com.mohamedrejeb.compose.dnd.reorder.rememberReorderState
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import sh.calvin.reorderable.ReorderableCollectionItemScope
@@ -174,6 +169,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 @Composable
 fun TasksScreen() {
     var showAddTaskSheet by remember { mutableStateOf(false) }
+    var editingTask by remember { mutableStateOf<TaskWithSubtasks?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val today = LocalDate.now()
@@ -310,7 +306,10 @@ fun TasksScreen() {
                 TaskListPage(
                     date = pageDate,
                     taskDao = taskDao,
-                    coroutineScope = coroutineScope
+                    coroutineScope = coroutineScope,
+                    onTaskClick = { taskWithSubtasks ->
+                        editingTask = taskWithSubtasks
+                    }
                 )
             }
             FloatingActionButton(
@@ -404,6 +403,19 @@ fun TasksScreen() {
             }
         )
     }
+
+    if (editingTask != null) {
+        EditTaskDialog(
+            taskWithSubtasks = editingTask!!,
+            onDismiss = { editingTask = null },
+            onSave = { updatedTask, updatedSubtasks ->
+                coroutineScope.launch {
+                    taskDao.updateTaskWithSubtasks(updatedTask, updatedSubtasks)
+                    editingTask = null
+                }
+            }
+        )
+    }
 }
 //}
 
@@ -427,7 +439,8 @@ fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
 fun TaskListPage(
     date: LocalDate,
     taskDao: TaskDao,
-    coroutineScope: CoroutineScope
+    coroutineScope: CoroutineScope,
+    onTaskClick: (TaskWithSubtasks) -> Unit
 ) {
     val startOfDay = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
     val endOfDay = date.atTime(LocalTime.MAX).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
@@ -463,6 +476,7 @@ fun TaskListPage(
                         task = item.task,
                         subtasks = item.subtasks,
                         reorderScope = this,
+                        onClick = { onTaskClick(item) },
                         onDragStopped = {
                             coroutineScope.launch {
                                 orderedTasks.forEachIndexed { index, t ->
@@ -491,6 +505,7 @@ fun TaskItemView(
     task: TaskEntity,
     subtasks: List<SubTaskEntity>,
     reorderScope: ReorderableCollectionItemScope,
+    onClick: () -> Unit,
     onToggleCompleted: (TaskEntity, List<SubTaskEntity>) -> Unit,
     onSubtaskToggle: (SubTaskEntity) -> Unit,
     onDragStopped: () -> Unit// новый колбэк для подзадач
@@ -508,7 +523,12 @@ fun TaskItemView(
         }
     }
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() },
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f), // фон задачи
         tonalElevation = 2.dp
@@ -774,7 +794,7 @@ fun AddTaskSheetContent(
     var isUrgent by remember { mutableStateOf(false) }
 
     // Сложность (1..5, 0 – не выбрано)
-    var difficulty by remember { mutableIntStateOf(0) }
+    var difficulty by remember { mutableIntStateOf(1) }
 
     // Цель
     var selectedGoal by remember { mutableStateOf<String?>(null) }
@@ -1258,12 +1278,592 @@ fun AddTaskSheetContent(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun EditTaskDialog(
+    taskWithSubtasks: TaskWithSubtasks,
+    onDismiss: () -> Unit,
+    onSave: (updatedTask: TaskEntity, updatedSubtasks: List<SubTaskEntity>) -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            EditTaskSheetContent(
+                taskWithSubtasks = taskWithSubtasks,
+                onDismiss = onDismiss,
+                onSave = onSave
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun EditTaskSheetContent(
+    taskWithSubtasks: TaskWithSubtasks,
+    onDismiss: () -> Unit,
+    onSave: (updatedTask: TaskEntity, updatedSubtasks: List<SubTaskEntity>) -> Unit
+) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val coroutineScope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
+    val density = LocalDensity.current
+
+    val task = taskWithSubtasks.task
+
+    var taskName by remember(task.id) { mutableStateOf(task.title) }
+    var showReminderDialog by remember(task.id) { mutableStateOf(false) }
+
+    var deadlineDateTime by remember(task.id) {
+        mutableStateOf(task.deadline_date?.let {
+            Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        })
+    }
+    var remindDateTime by remember(task.id) {
+        mutableStateOf(task.remind_date?.let {
+            Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        })
+    }
+
+    var selectedDays by remember(task.id) {
+        mutableStateOf(
+            buildSet {
+                if (task.repeat_mon) add(DayOfWeek.MONDAY)
+                if (task.repeat_tue) add(DayOfWeek.TUESDAY)
+                if (task.repeat_wed) add(DayOfWeek.WEDNESDAY)
+                if (task.repeat_thu) add(DayOfWeek.THURSDAY)
+                if (task.repeat_fri) add(DayOfWeek.FRIDAY)
+                if (task.repeat_sat) add(DayOfWeek.SATURDAY)
+                if (task.repeat_sun) add(DayOfWeek.SUNDAY)
+            }
+        )
+    }
+
+    var subTasks by remember(task.id) {
+        mutableStateOf(
+            taskWithSubtasks.subtasks.map { it.toUiModel() }
+                .ifEmpty { emptyList() }
+        )
+    }
+
+    val scrollState = rememberScrollState()
+
+    var isImportant by remember(task.id) { mutableStateOf(task.is_important == true) }
+    var isUrgent by remember(task.id) { mutableStateOf(task.is_urgency == true) }
+    var difficulty by remember(task.id) { mutableIntStateOf(task.difficulty ?: 0) }
+
+    var selectedGoal by remember(task.id) { mutableStateOf<String?>(null) }
+    var showGoalSelector by remember(task.id) { mutableStateOf(false) }
+    var goalButtonBounds by remember(task.id) { mutableStateOf<Rect?>(null) }
+
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    var hasKeyboardShown by remember { mutableStateOf(false) }
+    if (imeBottom > 0) hasKeyboardShown = true
+
+    var isDismissing by remember { mutableStateOf(false) }
+    var AnimatabletranslationY = remember { Animatable(0f) }
+    val canSave = taskName.trim().isNotEmpty()
+
+    fun triggerDismiss(pendingTask: String? = null) {
+        if (isDismissing) return
+        isDismissing = true
+        keyboardController?.hide()
+
+        coroutineScope.launch {
+            AnimatabletranslationY.animateTo(
+                targetValue = 1200f,
+                animationSpec = tween(durationMillis = 260, easing = FastOutLinearInEasing)
+            )
+
+            pendingTask?.let { title ->
+                val updatedTask = task.copy(
+                    title = title,
+                    is_important = isImportant,
+                    is_urgency = isUrgent,
+                    difficulty = if (difficulty == 0) 1 else difficulty,
+                    deadline_date = deadlineDateTime
+                        ?.atZone(ZoneId.systemDefault())
+                        ?.toInstant()
+                        ?.toEpochMilli(),
+                    remind_date = remindDateTime
+                        ?.toInstant(ZoneOffset.UTC)
+                        ?.toEpochMilli(),
+                    repeat_mon = selectedDays.contains(DayOfWeek.MONDAY),
+                    repeat_tue = selectedDays.contains(DayOfWeek.TUESDAY),
+                    repeat_wed = selectedDays.contains(DayOfWeek.WEDNESDAY),
+                    repeat_thu = selectedDays.contains(DayOfWeek.THURSDAY),
+                    repeat_fri = selectedDays.contains(DayOfWeek.FRIDAY),
+                    repeat_sat = selectedDays.contains(DayOfWeek.SATURDAY),
+                    repeat_sun = selectedDays.contains(DayOfWeek.SUNDAY)
+                )
+
+                val updatedSubtasks = subTasks
+                    .map { draft ->
+                        SubTaskEntity(
+                            task_id = task.id,
+                            subtask_title = draft.textValue.text.trim(),
+                            is_completed = draft.isDone
+                        )
+                    }
+                    .filter { !it.subtask_title.isNullOrBlank() }
+
+                onSave(updatedTask, updatedSubtasks)
+            }
+
+            onDismiss()
+        }
+    }
+
+    val scrimAlpha by animateFloatAsState(
+        targetValue = when {
+            isDismissing -> 0f
+            hasKeyboardShown -> 0.45f
+            else -> 0f
+        },
+        animationSpec = tween(220),
+        label = "scrim_alpha"
+    )
+
+    val sheetAlpha by animateFloatAsState(
+        targetValue = if (hasKeyboardShown && !isDismissing) 1f else 0f,
+        animationSpec = tween(180),
+        label = "sheet_alpha"
+    )
+
+    LaunchedEffect(Unit) {
+        delay(16)
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .alpha(scrimAlpha)
+            .background(Color.Black)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { triggerDismiss(taskName.trim()) }
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(sheetAlpha)
+            .graphicsLayer { translationY = AnimatabletranslationY.value }
+            .semantics { testTag = "edit_task_sheet" }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                showGoalSelector = false
+            },
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 8.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp)
+        ) {
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .draggable(
+                        orientation = Orientation.Vertical,
+                        state = rememberDraggableState { delta ->
+                            if (!isDismissing) {
+                                coroutineScope.launch {
+                                    AnimatabletranslationY.snapTo((AnimatabletranslationY.value + delta).coerceAtLeast(0f))
+                                }
+                            }
+                        },
+                        onDragStopped = { velocity ->
+                            if (isDismissing) return@draggable
+                            if (AnimatabletranslationY.value > 600f || velocity > 5000f) {
+                                triggerDismiss(taskName.trim())
+                            } else {
+                                coroutineScope.launch {
+                                    AnimatabletranslationY.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(4.dp)
+                        .background(Color.LightGray, RoundedCornerShape(2.dp))
+                )
+            }
+
+            Column(modifier = Modifier.padding(horizontal = 15.dp)) {
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = taskName,
+                    onValueChange = { taskName = it },
+                    placeholder = { Text("Название задачи...", fontSize = 16.sp, color = Color.Gray) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                    shape = RoundedCornerShape(16.dp),
+                    singleLine = true,
+                    leadingIcon = {
+                        Surface(
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .size(38.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = {
+                                subTasks = subTasks + SubTask()
+                                coroutineScope.launch {
+                                    delay(50)
+                                    scrollState.animateScrollTo(scrollState.maxValue + 500)
+                                }
+                            },
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                "Добавить подзадачу",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f)
+                    )
+                )
+
+                if (subTasks.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.heightIn(max = 110.dp)) {
+                        Column(modifier = Modifier.verticalScroll(scrollState)) {
+                            subTasks.forEach { subTask ->
+                                key(subTask.id) {
+                                    var isVisible by remember { mutableStateOf(true) }
+                                    AnimatedVisibility(
+                                        visible = isVisible,
+                                        enter = expandVertically(tween(300)) + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        SubTaskItem(
+                                            subTask = subTask,
+                                            onTextValueChange = { newValue ->
+                                                subTasks = subTasks.map {
+                                                    if (it.id == subTask.id) it.copy(textValue = newValue) else it
+                                                }
+                                            },
+                                            onToggle = {
+                                                subTasks = subTasks.map {
+                                                    if (it.id == subTask.id) it.copy(isDone = !it.isDone) else it
+                                                }
+                                            },
+                                            onDelete = {
+                                                isVisible = false
+                                                coroutineScope.launch {
+                                                    delay(200)
+                                                    subTasks = subTasks.filter { it.id != subTask.id }
+                                                    if (imeBottom > 0) {
+                                                        focusRequester.requestFocus()
+                                                        keyboardController?.show()
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.width(80.dp),
+                        verticalArrangement = Arrangement.Top
+                    ) {
+                        FilterChip(
+                            selected = isImportant,
+                            onClick = { isImportant = !isImportant },
+                            label = { Text("Важно", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth().height(43.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFFFA726)
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        FilterChip(
+                            selected = isUrgent,
+                            onClick = { isUrgent = !isUrgent },
+                            label = { Text("Срочно", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth().height(43.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFEF5350)
+                            )
+                        )
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.Top
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().height(43.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1.5f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Легко", fontSize = 10.sp, color = Color.Gray)
+                                    Text("Сложно", fontSize = 10.sp, color = Color.Gray)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    for (level in 1..5) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .background(
+                                                    if (level <= difficulty) MaterialTheme.colorScheme.primary
+                                                    else Color.LightGray.copy(alpha = 0.3f),
+                                                    RoundedCornerShape(6.dp)
+                                                )
+                                                .clickable { difficulty = level }
+                                        )
+                                        if (level < 5) Spacer(modifier = Modifier.width(1.dp))
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Box(modifier = Modifier.weight(1f)) {
+                                val goalText = selectedGoal ?: "Цель"
+                                Surface(
+                                    onClick = { showGoalSelector = true },
+                                    modifier = Modifier
+                                        .height(43.dp)
+                                        .fillMaxWidth()
+                                        .onGloballyPositioned {
+                                            goalButtonBounds = it.boundsInWindow()
+                                        },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.2f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Star,
+                                            null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = Color.Gray
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            if (goalText.length > 15) goalText.take(15) + "…" else goalText,
+                                            fontSize = 12.sp,
+                                            color = Color.Gray,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                                if (showGoalSelector && goalButtonBounds != null) {
+                                    Popup(
+                                        alignment = Alignment.TopCenter,
+                                        offset = IntOffset(10, -goalButtonBounds!!.height.toInt() - 8),
+                                        onDismissRequest = { showGoalSelector = false },
+                                        properties = PopupProperties(focusable = false)   // ← отключаем захват фокуса
+                                    ) {
+                                        // После открытия попапа возвращаем фокус основному полю,
+                                        // но только если клавиатура была видна до этого
+                                        LaunchedEffect(Unit) {
+                                            if (imeBottom > 0) {
+                                                focusRequester.requestFocus()
+                                                keyboardController?.show()
+                                            }
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            shadowElevation = 8.dp,
+                                            border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f))
+                                        ) {
+                                            Column(modifier = Modifier.width(300.dp).padding(3.dp)) {
+                                                GoalItem("Без цели", selectedGoal == null) {
+                                                    selectedGoal = null
+                                                    showGoalSelector = false
+                                                }
+                                                GoalItem("Работа", selectedGoal == "Работа") {
+                                                    selectedGoal = "Работа"
+                                                    showGoalSelector = false
+                                                }
+                                                GoalItem("Личное", selectedGoal == "Личное") {
+                                                    selectedGoal = "Личное"
+                                                    showGoalSelector = false
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                onClick = { showReminderDialog = true },
+                                modifier = Modifier.weight(1f).height(43.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                )
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.TwoTone.DateRange,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                onClick = { if (canSave) triggerDismiss(taskName.trim()) },
+                                enabled = canSave,
+                                modifier = Modifier
+                                    .size(43.dp)
+                                    .semantics { testTag = "save_task_button" },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (canSave) MaterialTheme.colorScheme.primary else Color.Gray
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        "Сохранить",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showReminderDialog) {
+        ReminderPickerDialog(
+            initialDate = deadlineDateTime?.toLocalDate() ?: LocalDate.now(),
+            initialTime = deadlineDateTime?.toLocalTime() ?: LocalTime.now().plusHours(1),
+            onDismiss = { showReminderDialog = false },
+            onSave = { date, time, remindValue, remindUnit, weekdays ->
+                val deadline = LocalDateTime.of(date, time)
+                deadlineDateTime = deadline
+                selectedDays = weekdays
+                remindDateTime = when (remindUnit) {
+                    ReminderUnit.MINUTES -> deadline.minusMinutes(remindValue.toLong())
+                    ReminderUnit.HOURS -> deadline.minusHours(remindValue.toLong())
+                    ReminderUnit.DAYS -> deadline.minusDays(remindValue.toLong())
+                    else -> deadline
+                }
+                showReminderDialog = false
+            }
+        )
+    }
+}
+
 @Stable
 data class SubTask(
     val id: Long = System.currentTimeMillis() + (0..1000).random(),
+    val dbId: Int? = null,
     var textValue: TextFieldValue = TextFieldValue(""), // Используем TextFieldValue
     var isDone: Boolean = false
 )
+
+private fun SubTaskEntity.toUiModel(): SubTask {
+    return SubTask(
+        id = this.id.toLong(),      // если у entity есть id
+        dbId = this.id,
+        textValue = TextFieldValue(this.subtask_title ?: ""),
+        isDone = this.is_completed
+    )
+}
+
+private fun List<SubTask>.toEntities(taskId: Int): List<SubTaskEntity> {
+    return map { draft ->
+        SubTaskEntity(
+            task_id = taskId,
+            subtask_title = draft.textValue.text.trim(),
+            is_completed = draft.isDone
+        )
+    }
+}
 
 @Composable
 fun SubTaskItem(
