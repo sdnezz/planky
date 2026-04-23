@@ -300,29 +300,28 @@ fun TasksScreen() {
             color = Color.Gray
         )
 
-        HorizontalPager(
-            state = taskPagerState,
-            modifier = Modifier.weight(1f),
-            beyondViewportPageCount = 1 // предзагружаем соседние дни
-        ) { page ->
-            val pageDate = today.plusDays((page - initialPage).toLong())
-
-            Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f)) {
+            HorizontalPager(
+                state = taskPagerState,
+                modifier = Modifier.fillMaxSize(),
+                beyondViewportPageCount = 1 // предзагружаем соседние дни
+            ) { page ->
+                val pageDate = today.plusDays((page - initialPage).toLong())
                 TaskListPage(
                     date = pageDate,
                     taskDao = taskDao,
                     coroutineScope = coroutineScope
                 )
-                FloatingActionButton(
-                    onClick = { showAddTaskSheet = true },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(36.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 16.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
-                }
+            }
+            FloatingActionButton(
+                onClick = { showAddTaskSheet = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(36.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 16.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
             }
         }
     }
