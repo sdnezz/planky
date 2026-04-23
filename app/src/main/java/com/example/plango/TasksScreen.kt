@@ -215,7 +215,10 @@ fun TasksScreen() {
     val hapticFeedback = LocalHapticFeedback.current
     val lazyListState = rememberLazyListState()
 
-
+    // Сбрасываем скролл при смене дня
+    LaunchedEffect(selectedDate) {
+        lazyListState.scrollToItem(0)
+    }
     val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
         // Эта лямбда вызывается при каждом сдвиге элемента во время drag
         // tasksList должен быть mutableStateOf, чтобы UI реагировал
@@ -226,6 +229,32 @@ fun TasksScreen() {
         hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
 
+    val taskPagerState = rememberPagerState(initialPage = initialPage) { 10000 }
+    // Свайп task pager → обновляем selectedDate + прокручиваем календарь
+
+    LaunchedEffect(taskPagerState.settledPage) {
+        val newDate = today.plusDays((taskPagerState.settledPage - initialPage).toLong())
+        if (newDate != selectedDate) {
+            selectedDate = newDate
+            // Прокручиваем недельный пейджер если нужная неделя другая
+            val todayMonday = today.minusDays(today.dayOfWeek.value.toLong() - 1)
+            val newMonday = newDate.minusDays(newDate.dayOfWeek.value.toLong() - 1)
+            val weeksBetween = ChronoUnit.WEEKS.between(todayMonday, newMonday)
+            val targetWeekPage = initialPage + weeksBetween.toInt()
+            if (pagerState.currentPage != targetWeekPage) {
+                pagerState.animateScrollToPage(targetWeekPage)
+            }
+        }
+    }
+
+    // Смена selectedDate снаружи (тап по дню, date picker) → прокручиваем task pager
+    LaunchedEffect(selectedDate) {
+        val dayOffset = ChronoUnit.DAYS.between(today, selectedDate).toInt()
+        val targetPage = initialPage + dayOffset
+        if (taskPagerState.settledPage != targetPage) {
+            taskPagerState.scrollToPage(targetPage)
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -516,11 +545,12 @@ fun TaskItemView(
                 Text(
                     text = task.title,
                     fontSize = 17.sp,
+                    modifier = Modifier.weight(1f),
                     fontWeight = FontWeight.Medium,
                     textDecoration = if (task.is_completed == true) TextDecoration.LineThrough else null,
                     color = if (task.is_completed == true) activeGreen else MaterialTheme.colorScheme.onBackground
                 )
-                Spacer(Modifier.weight(1f))
+//                Spacer(Modifier.weight(1f))
 
                 Icon(
                     imageVector = Icons.Rounded.Menu,
