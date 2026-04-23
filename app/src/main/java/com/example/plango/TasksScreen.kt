@@ -157,8 +157,10 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.text.style.TextAlign
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import sh.calvin.reorderable.ReorderableCollectionItemScope
@@ -492,6 +494,11 @@ fun TaskListPage(
                         },
                         onSubtaskToggle = { updatedSubtask ->
                             coroutineScope.launch { taskDao.updateSubTask(updatedSubtask) }
+                        },
+                        onDeleteTask = { taskToDelete ->
+                            coroutineScope.launch {
+                                taskDao.deleteTask(taskToDelete)
+                            }
                         }
                     )
                 }
@@ -508,10 +515,88 @@ fun TaskItemView(
     onClick: () -> Unit,
     onToggleCompleted: (TaskEntity, List<SubTaskEntity>) -> Unit,
     onSubtaskToggle: (SubTaskEntity) -> Unit,
-    onDragStopped: () -> Unit// новый колбэк для подзадач
+    onDragStopped: () -> Unit,
+    onDeleteTask: (TaskEntity) -> Unit
 ) {
+    var showDeleteDialog by remember(task.id) { mutableStateOf(false) }
     var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
     val activeGreen = Color(0xFF4CAF50)
+
+    if (showDeleteDialog) {
+        Dialog(
+            onDismissRequest = { showDeleteDialog = false }
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp,
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.wrapContentSize()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(20.dp)
+                        .wrapContentWidth()
+                        .wrapContentHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Удалить задачу?",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            onClick = { showDeleteDialog = false },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Отмена",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = {
+                                showDeleteDialog = false
+                                onDeleteTask(task)
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.error
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "ОК",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -595,7 +680,17 @@ fun TaskItemView(
                     textDecoration = if (task.is_completed == true) TextDecoration.LineThrough else null,
                     color = if (task.is_completed == true) activeGreen else MaterialTheme.colorScheme.onBackground
                 )
-//                Spacer(Modifier.weight(1f))
+
+                IconButton(
+                    onClick = { showDeleteDialog = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Удалить задачу",
+                        tint = Color(0xFFD32F2F)
+                    )
+                }
 
                 Icon(
                     imageVector = Icons.Rounded.Menu,
@@ -1415,7 +1510,6 @@ fun EditTaskSheetContent(
                             is_completed = draft.isDone
                         )
                     }
-                    .filter { !it.subtask_title.isNullOrBlank() }
 
                 onSave(updatedTask, updatedSubtasks)
             }
