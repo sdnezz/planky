@@ -165,6 +165,7 @@ import androidx.compose.runtime.mutableStateListOf
 //import com.mohamedrejeb.compose.dnd.reorder.ReorderableItem
 //import com.mohamedrejeb.compose.dnd.reorder.rememberReorderState
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CoroutineScope
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -299,67 +300,29 @@ fun TasksScreen() {
             color = Color.Gray
         )
 
-        // Оборачиваем в Box LazyColumn и кнопку
-        Box(modifier = Modifier.weight(1f)) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 8.dp),
-                state = lazyListState, // 3. Передаём state в LazyColumn
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // 4. items() обязательно должен иметь стабильный key
-                items(orderedTasks, key = { it.task.id }) { item ->
+        HorizontalPager(
+            state = taskPagerState,
+            modifier = Modifier.weight(1f),
+            beyondViewportPageCount = 1 // предзагружаем соседние дни
+        ) { page ->
+            val pageDate = today.plusDays((page - initialPage).toLong())
 
-                    // 5. Оборачиваем каждый элемент в ReorderableItem
-                    ReorderableItem(reorderableLazyListState, key = item.task.id) { isDragging ->
-
-                        // isDragging можно использовать для визуального эффекта (тень и т.д.)
-                        val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp)
-
-                        Surface(shadowElevation = elevation) {
-                            // 6. Передаём scope (this) в TaskItemView, чтобы можно было
-                            //    применить Modifier.draggableHandle() внутри него
-                            TaskItemView(
-                                task = item.task,
-                                subtasks = item.subtasks,
-                                reorderScope = this,
-                                onDragStopped = {
-                                    // orderedTasks к этому моменту уже обновлён библиотекой
-                                    coroutineScope.launch {
-                                        orderedTasks.forEachIndexed { index, taskWithSubtasks ->
-                                            taskDao.updateTask(
-                                                taskWithSubtasks.task.copy(position = index + 1)
-                                            )
-                                        }
-                                    }
-                                },
-                                onToggleCompleted = { updatedTask, updatedSubtasks ->
-                                    coroutineScope.launch {
-                                        taskDao.updateTask(updatedTask)
-                                        updatedSubtasks.forEach { taskDao.updateSubTask(it) }
-                                    }
-                                },
-                                onSubtaskToggle = { updatedSubtask ->
-                                    coroutineScope.launch { taskDao.updateSubTask(updatedSubtask) }
-                                }
-                            )
-                        }
-                    }
+            Box(modifier = Modifier.fillMaxSize()) {
+                TaskListPage(
+                    date = pageDate,
+                    taskDao = taskDao,
+                    coroutineScope = coroutineScope
+                )
+                FloatingActionButton(
+                    onClick = { showAddTaskSheet = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(36.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 16.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
                 }
-            }
-
-
-            // Кнопка справа внизу поверх списка
-            FloatingActionButton(
-                onClick = { showAddTaskSheet = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                shape = RoundedCornerShape(36.dp),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = 16.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
             }
         }
     }
@@ -458,6 +421,69 @@ fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
         days > 0 -> "осталось $days дн $hours ч"
         hours > 0 -> "осталось $hours ч $minutes мин"
         else -> "осталось $minutes мин"
+    }
+}
+
+@Composable
+fun TaskListPage(
+    date: LocalDate,
+    taskDao: TaskDao,
+    coroutineScope: CoroutineScope
+) {
+    val startOfDay = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    val endOfDay = date.atTime(LocalTime.MAX).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+
+    val tasksFlow = remember(date) { taskDao.getTasksWithSubtasksForDay(startOfDay, endOfDay) }
+    val tasksList by tasksFlow.collectAsState(initial = emptyList())
+
+    var orderedTasks by remember(date, tasksList) {
+        mutableStateOf(tasksList.sortedBy { it.task.position })
+    }
+
+    val hapticFeedback = LocalHapticFeedback.current
+    val lazyListState = rememberLazyListState()
+    val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        orderedTasks = orderedTasks.toMutableList().apply {
+            add(to.index, removeAt(from.index))
+        }
+        hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 8.dp),
+        state = lazyListState,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        items(orderedTasks, key = { it.task.id }) { item ->
+            ReorderableItem(reorderableLazyListState, key = item.task.id) { isDragging ->
+                val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp)
+                Surface(shadowElevation = elevation) {
+                    TaskItemView(
+                        task = item.task,
+                        subtasks = item.subtasks,
+                        reorderScope = this,
+                        onDragStopped = {
+                            coroutineScope.launch {
+                                orderedTasks.forEachIndexed { index, t ->
+                                    taskDao.updateTask(t.task.copy(position = index + 1))
+                                }
+                            }
+                        },
+                        onToggleCompleted = { updatedTask, updatedSubtasks ->
+                            coroutineScope.launch {
+                                taskDao.updateTask(updatedTask)
+                                updatedSubtasks.forEach { taskDao.updateSubTask(it) }
+                            }
+                        },
+                        onSubtaskToggle = { updatedSubtask ->
+                            coroutineScope.launch { taskDao.updateSubTask(updatedSubtask) }
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 
