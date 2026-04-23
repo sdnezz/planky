@@ -167,7 +167,6 @@ import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
-
 @Composable
 fun TasksScreen() {
     var showAddTaskSheet by remember { mutableStateOf(false) }
@@ -182,6 +181,9 @@ fun TasksScreen() {
     // Параметры для "бесконечного" пейджера
     val initialPage = 5000
     val pagerState = rememberPagerState(initialPage = initialPage) { 10000 }
+    var weekPagerProgrammaticScroll by remember { mutableStateOf(false) }
+    var taskPagerProgrammaticScroll by remember { mutableStateOf(false) }
+    var ignoreWeekPagerUpdate by remember { mutableStateOf(false) }
 
     // ВЫЧИСЛЯЕМ ОТОБРАЖАЕМЫЙ МЕСЯЦ на основе текущей страницы пейджера
     val displayedMonthText = remember(pagerState.currentPage) {
@@ -218,42 +220,65 @@ fun TasksScreen() {
     LaunchedEffect(selectedDate) {
         lazyListState.scrollToItem(0)
     }
-    val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        // Эта лямбда вызывается при каждом сдвиге элемента во время drag
-        // tasksList должен быть mutableStateOf, чтобы UI реагировал
-        orderedTasks = orderedTasks.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        }
-        // Опционально: haptic feedback при перестановке
-        hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
-    }
 
     val taskPagerState = rememberPagerState(initialPage = initialPage) { 10000 }
     // Свайп task pager → обновляем selectedDate + прокручиваем календарь
 
-    LaunchedEffect(taskPagerState.settledPage) {
-        val newDate = today.plusDays((taskPagerState.settledPage - initialPage).toLong())
-        if (newDate != selectedDate) {
-            selectedDate = newDate
-            // Прокручиваем недельный пейджер если нужная неделя другая
-            val todayMonday = today.minusDays(today.dayOfWeek.value.toLong() - 1)
-            val newMonday = newDate.minusDays(newDate.dayOfWeek.value.toLong() - 1)
-            val weeksBetween = ChronoUnit.WEEKS.between(todayMonday, newMonday)
-            val targetWeekPage = initialPage + weeksBetween.toInt()
-            if (pagerState.currentPage != targetWeekPage) {
-                pagerState.animateScrollToPage(targetWeekPage)
-            }
+    val todayMonday = today.minusDays(today.dayOfWeek.value.toLong() - 1)
+
+    LaunchedEffect(selectedDate) {
+        val selectedMonday = selectedDate.minusDays(selectedDate.dayOfWeek.value.toLong() - 1)
+        val weeksBetween = ChronoUnit.WEEKS.between(todayMonday, selectedMonday)
+        val targetWeekPage = initialPage + weeksBetween.toInt()
+
+        if (pagerState.currentPage != targetWeekPage) {
+            weekPagerProgrammaticScroll = true
+            pagerState.scrollToPage(targetWeekPage)
+            weekPagerProgrammaticScroll = false
         }
     }
 
-    // Смена selectedDate снаружи (тап по дню, date picker) → прокручиваем task pager
     LaunchedEffect(selectedDate) {
         val dayOffset = ChronoUnit.DAYS.between(today, selectedDate).toInt()
-        val targetPage = initialPage + dayOffset
-        if (taskPagerState.settledPage != targetPage) {
-            taskPagerState.scrollToPage(targetPage)
+        val targetDayPage = initialPage + dayOffset
+
+        if (taskPagerState.currentPage != targetDayPage) {
+            taskPagerProgrammaticScroll = true
+            taskPagerState.scrollToPage(targetDayPage)
+            taskPagerProgrammaticScroll = false
         }
     }
+
+    LaunchedEffect(taskPagerState.settledPage) {
+        if (taskPagerProgrammaticScroll) return@LaunchedEffect
+
+        val newDate = today.plusDays((taskPagerState.settledPage - initialPage).toLong())
+        if (newDate != selectedDate) {
+            selectedDate = newDate
+        }
+    }
+
+    LaunchedEffect(pagerState.settledPage) {
+        if (weekPagerProgrammaticScroll) return@LaunchedEffect
+
+        val weekOffset = pagerState.settledPage - initialPage
+        val mondayOfVisibleWeek = todayMonday.plusWeeks(weekOffset.toLong())
+
+        val selectedDayOffset = selectedDate.dayOfWeek.value.toLong() - 1
+        val newDate = mondayOfVisibleWeek.plusDays(selectedDayOffset)
+
+        if (newDate != selectedDate) {
+            selectedDate = newDate
+        }
+    }
+    // Смена selectedDate снаружи (тап по дню, date picker) → прокручиваем task pager
+//    LaunchedEffect(selectedDate) {
+//        val dayOffset = ChronoUnit.DAYS.between(today, selectedDate).toInt()
+//        val targetPage = initialPage + dayOffset
+//        if (taskPagerState.settledPage != targetPage) {
+//            taskPagerState.scrollToPage(targetPage)
+//        }
+//    }
     Column(
         modifier = Modifier
             .fillMaxSize()
