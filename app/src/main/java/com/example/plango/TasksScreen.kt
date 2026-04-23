@@ -1454,7 +1454,7 @@ fun EditTaskSheetContent(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
-            ) { triggerDismiss(taskName.trim()) }
+            ) { triggerDismiss() }
     )
 
     Surface(
@@ -1496,7 +1496,7 @@ fun EditTaskSheetContent(
                         onDragStopped = { velocity ->
                             if (isDismissing) return@draggable
                             if (AnimatabletranslationY.value > 600f || velocity > 5000f) {
-                                triggerDismiss(taskName.trim())
+                                triggerDismiss()
                             } else {
                                 coroutineScope.launch {
                                     AnimatabletranslationY.animateTo(
