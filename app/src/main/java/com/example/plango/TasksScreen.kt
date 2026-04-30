@@ -167,6 +167,74 @@ import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
+private data class RecurringEditRequest(
+    val original: TaskWithSubtasks,
+    val updatedTask: TaskEntity,
+    val updatedSubtasks: List<SubTaskEntity>
+)
+
+private fun TaskEntity.isRecurringSeries(): Boolean =
+    source_task_id == null && (
+            repeat_mon || repeat_tue || repeat_wed || repeat_thu ||
+                    repeat_fri || repeat_sat || repeat_sun
+            )
+
+private fun TaskEntity.toDisplayCopyForDate(date: LocalDate): TaskEntity {
+    val baseTimeMinutes = deadline_time_minutes ?: deadline_date?.let {
+        val zdt = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
+        zdt.hour * 60 + zdt.minute
+    }
+
+    val displayDeadline = baseTimeMinutes?.let { minutes ->
+        val time = LocalTime.of(minutes / 60, minutes % 60)
+        date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }
+
+    val remindBefore = remind_before_minutes ?: run {
+        if (deadline_date != null && remind_date != null) {
+            val deadlineLdt = Instant.ofEpochMilli(deadline_date).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            val remindLdt = Instant.ofEpochMilli(remind_date).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            Duration.between(remindLdt, deadlineLdt).toMinutes().toInt().coerceAtLeast(0)
+        } else null
+    }
+
+    val displayRemind = if (displayDeadline != null && remindBefore != null) {
+        displayDeadline - remindBefore * 60_000L
+    } else {
+        remind_date
+    }
+
+    return copy(
+        date_of_task = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        deadline_date = displayDeadline,
+        remind_date = displayRemind
+    )
+}
+
+private fun TaskEntity.sameMetaAs(other: TaskEntity): Boolean {
+    return title == other.title &&
+            is_important == other.is_important &&
+            is_urgency == other.is_urgency &&
+            difficulty == other.difficulty &&
+            goal_id == other.goal_id &&
+            deadline_date == other.deadline_date &&
+            remind_date == other.remind_date &&
+            repeat_mon == other.repeat_mon &&
+            repeat_tue == other.repeat_tue &&
+            repeat_wed == other.repeat_wed &&
+            repeat_thu == other.repeat_thu &&
+            repeat_fri == other.repeat_fri &&
+            repeat_sat == other.repeat_sat &&
+            repeat_sun == other.repeat_sun
+}
+
+private fun List<SubTaskEntity>.sameContentAs(other: List<SubTaskEntity>): Boolean {
+    if (size != other.size) return false
+    return zip(other).all { (a, b) ->
+        a.subtask_title == b.subtask_title && a.is_completed == b.is_completed
+    }
+}
+
 @Composable
 fun TasksScreen() {
     var showAddTaskSheet by remember { mutableStateOf(false) }
@@ -207,8 +275,24 @@ fun TasksScreen() {
             .toEpochMilli()
 
     // Подписываемся на поток данных из БД
-    val tasksFlow = remember(selectedDate) { taskDao.getTasksWithSubtasksForDay(startOfDay, endOfDay) }
+    val tasksFlow = remember(selectedDate) {
+        val dow = selectedDate.dayOfWeek
+        taskDao.getTasksWithSubtasksForDay(
+            startOfDay = startOfDay,
+            endOfDay = endOfDay,
+            isMon = if (dow == DayOfWeek.MONDAY) 1 else 0,
+            isTue = if (dow == DayOfWeek.TUESDAY) 1 else 0,
+            isWed = if (dow == DayOfWeek.WEDNESDAY) 1 else 0,
+            isThu = if (dow == DayOfWeek.THURSDAY) 1 else 0,
+            isFri = if (dow == DayOfWeek.FRIDAY) 1 else 0,
+            isSat = if (dow == DayOfWeek.SATURDAY) 1 else 0,
+            isSun = if (dow == DayOfWeek.SUNDAY) 1 else 0
+        )
+    }
     val tasksList by tasksFlow.collectAsState(initial = emptyList())
+
+    var showRecurringSaveDialog by remember { mutableStateOf(false) }
+    var pendingRecurringEdit by remember { mutableStateOf<RecurringEditRequest?>(null) }
 
     var orderedTasks by remember(selectedDate, tasksList) {
         mutableStateOf(tasksList.sortedBy { it.task.position })
@@ -271,14 +355,7 @@ fun TasksScreen() {
             selectedDate = newDate
         }
     }
-    // Смена selectedDate снаружи (тап по дню, date picker) → прокручиваем task pager
-//    LaunchedEffect(selectedDate) {
-//        val dayOffset = ChronoUnit.DAYS.between(today, selectedDate).toInt()
-//        val targetPage = initialPage + dayOffset
-//        if (taskPagerState.settledPage != targetPage) {
-//            taskPagerState.scrollToPage(targetPage)
-//        }
-//    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -355,43 +432,60 @@ fun TasksScreen() {
     if (showAddTaskSheet) {
         AddTaskDialog(
             onDismiss = { showAddTaskSheet = false },
-            onTaskAdded = {
-                    title, important, urgent, diff, subTasksList, deadline, remind, weekdays ->
+            onTaskAdded = { title, important, urgent, diff, subTasksList, deadline, remind, weekdays ->
                 coroutineScope.launch {
                     val startOfDay = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
                     val endOfDay = selectedDate.atTime(LocalTime.MAX).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
 
-                    // Получаем количество задач на выбранный день
-                    val count = taskDao.getTaskCountForDay(startOfDay, endOfDay)
-                    val position = count + 1
-                    // 1. Создаем основную задачу
+                    val dow = selectedDate.dayOfWeek
+                    val count = taskDao.getVisibleTaskCountForDay(
+                        startOfDay = startOfDay,
+                        endOfDay = endOfDay,
+                        isMon = if (dow == DayOfWeek.MONDAY) 1 else 0,
+                        isTue = if (dow == DayOfWeek.TUESDAY) 1 else 0,
+                        isWed = if (dow == DayOfWeek.WEDNESDAY) 1 else 0,
+                        isThu = if (dow == DayOfWeek.THURSDAY) 1 else 0,
+                        isFri = if (dow == DayOfWeek.FRIDAY) 1 else 0,
+                        isSat = if (dow == DayOfWeek.SATURDAY) 1 else 0,
+                        isSun = if (dow == DayOfWeek.SUNDAY) 1 else 0
+                    )
+
+                    val isRecurring = weekdays.isNotEmpty()
+                    val deadlineMinutes = if (isRecurring) {
+                        deadline?.let { it.hour * 60 + it.minute }
+                    } else null
+
+                    val remindBeforeMinutes = if (isRecurring && deadline != null && remind != null) {
+                        Duration.between(remind, deadline).toMinutes().toInt().coerceAtLeast(0)
+                    } else null
+
                     val newTask = TaskEntity(
                         title = title,
-                        date_of_task = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-                        position = position,
+                        date_of_task = startOfDay,
+                        position = count + 1,
                         is_important = important,
                         is_urgency = urgent,
                         difficulty = if (diff == 0) 1 else diff,
                         is_completed = false,
                         deadline_date = deadline?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
-                        remind_date = remind?.toInstant(ZoneOffset.UTC)?.toEpochMilli(),
+                        remind_date = remind?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
                         repeat_mon = weekdays.contains(DayOfWeek.MONDAY),
                         repeat_tue = weekdays.contains(DayOfWeek.TUESDAY),
                         repeat_wed = weekdays.contains(DayOfWeek.WEDNESDAY),
                         repeat_thu = weekdays.contains(DayOfWeek.THURSDAY),
                         repeat_fri = weekdays.contains(DayOfWeek.FRIDAY),
                         repeat_sat = weekdays.contains(DayOfWeek.SATURDAY),
-                        repeat_sun = weekdays.contains(DayOfWeek.SUNDAY)
+                        repeat_sun = weekdays.contains(DayOfWeek.SUNDAY),
+                        repeat_until_date = null,
+                        source_task_id = null,
+                        deadline_time_minutes = deadlineMinutes,
+                        remind_before_minutes = remindBeforeMinutes
                     )
 
-                    // 2. Вставляем задачу и получаем её ID
                     val taskId = taskDao.insertTask(newTask)
 
-                    // 3. Сохраняем подзадачи, привязывая их к taskId
                     subTasksList.forEach { subTaskData ->
                         val subTaskText = subTaskData.textValue.text.trim()
-                        // Проверяем на пустую строку (добавлен безопасный вызов ?. и импорт выше)
-//                            if (subTaskData.textValue.text.isNotBlank()) {
                         taskDao.insertSubTask(
                             SubTaskEntity(
                                 task_id = taskId.toInt(),
@@ -436,12 +530,168 @@ fun TasksScreen() {
             taskWithSubtasks = editingTask!!,
             onDismiss = { editingTask = null },
             onSave = { updatedTask, updatedSubtasks ->
-                coroutineScope.launch {
-                    taskDao.updateTaskWithSubtasks(updatedTask, updatedSubtasks)
-                    editingTask = null
+                val original = editingTask!!
+                val originalTask = original.task
+                val metadataChanged = !originalTask.sameMetaAs(updatedTask)
+                val subtasksChanged = !original.subtasks.sameContentAs(updatedSubtasks)
+
+                if (originalTask.isRecurringSeries()) {
+                    if (metadataChanged) {
+                        pendingRecurringEdit = RecurringEditRequest(
+                            original = original,
+                            updatedTask = updatedTask,
+                            updatedSubtasks = updatedSubtasks
+                        )
+                        showRecurringSaveDialog = true
+                    } else {
+                        coroutineScope.launch {
+                            taskDao.saveRecurringOccurrenceForDate(
+                                baseTask = originalTask,
+                                occurrenceDate = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+                                updatedTask = updatedTask,
+                                subtasks = updatedSubtasks
+                            )
+                            editingTask = null
+                        }
+                    }
+                } else {
+                    coroutineScope.launch {
+                        taskDao.updateTaskWithSubtasks(updatedTask, updatedSubtasks)
+                        editingTask = null
+                    }
                 }
             }
         )
+    }
+
+    if (showRecurringSaveDialog && pendingRecurringEdit != null) {
+        val request = pendingRecurringEdit!!
+
+        Dialog(
+            onDismissRequest = {
+                showRecurringSaveDialog = false
+                pendingRecurringEdit = null
+            }
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(20.dp)
+                        .widthIn(min = 280.dp, max = 360.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Изменить повторяющуюся задачу",
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            onClick = {
+                                coroutineScope.launch {
+                                    taskDao.saveRecurringOccurrenceForDate(
+                                        baseTask = request.original.task,
+                                        occurrenceDate = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+                                        updatedTask = request.updatedTask,
+                                        subtasks = request.updatedSubtasks
+                                    )
+                                    editingTask = null
+                                    showRecurringSaveDialog = false
+                                    pendingRecurringEdit = null
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 14.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Только на сегодня",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = {
+                                coroutineScope.launch {
+                                    taskDao.splitRecurringSeries(
+                                        originalTask = request.original.task,
+                                        newTask = request.updatedTask.copy(
+                                            date_of_task = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+                                        ),
+                                        subtasks = request.updatedSubtasks,
+                                        effectiveDate = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+                                    )
+                                    editingTask = null
+                                    showRecurringSaveDialog = false
+                                    pendingRecurringEdit = null
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 14.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "И все последующие",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Surface(
+                                onClick = {
+                                    showRecurringSaveDialog = false
+                                    pendingRecurringEdit = null
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                                modifier = Modifier.align(Alignment.CenterEnd)
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Отмена",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 //}
@@ -471,12 +721,34 @@ fun TaskListPage(
 ) {
     val startOfDay = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
     val endOfDay = date.atTime(LocalTime.MAX).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+    val dow = date.dayOfWeek
 
-    val tasksFlow = remember(date) { taskDao.getTasksWithSubtasksForDay(startOfDay, endOfDay) }
+    val tasksFlow = remember(date) {
+        taskDao.getTasksWithSubtasksForDay(
+            startOfDay = startOfDay,
+            endOfDay = endOfDay,
+            isMon = if (dow == DayOfWeek.MONDAY) 1 else 0,
+            isTue = if (dow == DayOfWeek.TUESDAY) 1 else 0,
+            isWed = if (dow == DayOfWeek.WEDNESDAY) 1 else 0,
+            isThu = if (dow == DayOfWeek.THURSDAY) 1 else 0,
+            isFri = if (dow == DayOfWeek.FRIDAY) 1 else 0,
+            isSat = if (dow == DayOfWeek.SATURDAY) 1 else 0,
+            isSun = if (dow == DayOfWeek.SUNDAY) 1 else 0
+        )
+    }
     val tasksList by tasksFlow.collectAsState(initial = emptyList())
 
-    var orderedTasks by remember(date, tasksList) {
-        mutableStateOf(tasksList.sortedBy { it.task.position })
+    val displayTasks = remember(date, tasksList) {
+        tasksList.map { item ->
+            val task = item.task
+            if (task.isRecurringSeries()) {
+                item.copy(task = task.toDisplayCopyForDate(date))
+            } else item
+        }.sortedBy { it.task.position }
+    }
+
+    var orderedTasks by remember(date, displayTasks) {
+        mutableStateOf(displayTasks)
     }
 
     val hapticFeedback = LocalHapticFeedback.current
@@ -513,16 +785,47 @@ fun TaskListPage(
                         },
                         onToggleCompleted = { updatedTask, updatedSubtasks ->
                             coroutineScope.launch {
-                                taskDao.updateTask(updatedTask)
-                                updatedSubtasks.forEach { taskDao.updateSubTask(it) }
+                                if (item.task.isRecurringSeries()) {
+                                    taskDao.saveRecurringOccurrenceForDate(
+                                        baseTask = item.task,
+                                        occurrenceDate = startOfDay,
+                                        updatedTask = updatedTask,
+                                        subtasks = updatedSubtasks
+                                    )
+                                } else {
+                                    taskDao.updateTask(updatedTask)
+                                    updatedSubtasks.forEach { taskDao.updateSubTask(it) }
+                                }
                             }
                         },
                         onSubtaskToggle = { updatedSubtask ->
-                            coroutineScope.launch { taskDao.updateSubTask(updatedSubtask) }
+                            coroutineScope.launch {
+                                if (item.task.isRecurringSeries()) {
+                                    val updatedTask = item.task.copy(is_completed = item.task.is_completed)
+                                    val currentSubtasks = item.subtasks.map { st ->
+                                        if (st.id == updatedSubtask.id) updatedSubtask else st
+                                    }
+                                    taskDao.saveRecurringOccurrenceForDate(
+                                        baseTask = item.task,
+                                        occurrenceDate = startOfDay,
+                                        updatedTask = updatedTask,
+                                        subtasks = currentSubtasks
+                                    )
+                                } else {
+                                    taskDao.updateSubTask(updatedSubtask)
+                                }
+                            }
                         },
                         onDeleteTask = { taskToDelete ->
                             coroutineScope.launch {
-                                taskDao.deleteTask(taskToDelete)
+                                if (item.task.isRecurringSeries()) {
+                                    taskDao.deleteOccurrenceForDate(
+                                        baseTask = item.task,
+                                        occurrenceDate = startOfDay
+                                    )
+                                } else {
+                                    taskDao.deleteTask(taskToDelete)
+                                }
                             }
                         }
                     )
