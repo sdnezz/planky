@@ -237,6 +237,8 @@ private fun List<SubTaskEntity>.sameContentAs(other: List<SubTaskEntity>): Boole
 
 @Composable
 fun TasksScreen() {
+    val haptic = LocalHapticFeedback.current
+
     var showAddTaskSheet by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<TaskWithSubtasks?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -372,7 +374,10 @@ fun TasksScreen() {
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
             )
-            IconButton(onClick = { showDatePicker = true }) {
+            IconButton(onClick = {
+                showDatePicker = true
+                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+            }) {
                 Icon(imageVector = Icons.Default.DateRange, contentDescription = "Календарь")
             }
         }
@@ -417,7 +422,10 @@ fun TasksScreen() {
                 )
             }
             FloatingActionButton(
-                onClick = { showAddTaskSheet = true },
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                    showAddTaskSheet = true
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 shape = RoundedCornerShape(36.dp),
                 modifier = Modifier
@@ -600,6 +608,7 @@ fun TasksScreen() {
                     ) {
                         Surface(
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 coroutineScope.launch {
                                     taskDao.saveRecurringOccurrenceForDate(
                                         baseTask = request.original.task,
@@ -632,6 +641,7 @@ fun TasksScreen() {
 
                         Surface(
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 coroutineScope.launch {
                                     taskDao.splitRecurringSeries(
                                         originalTask = request.original.task,
@@ -669,6 +679,7 @@ fun TasksScreen() {
                         ) {
                             Surface(
                                 onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                     showRecurringSaveDialog = false
                                     pendingRecurringEdit = null
                                 },
@@ -849,7 +860,7 @@ fun TaskItemView(
     var showDeleteDialog by remember(task.id) { mutableStateOf(false) }
     var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
     val activeGreen = Color(0xFF4CAF50)
-
+    val haptic = LocalHapticFeedback.current
     if (showDeleteDialog) {
         Dialog(
             onDismissRequest = { showDeleteDialog = false }
@@ -883,7 +894,9 @@ fun TaskItemView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
-                            onClick = { showDeleteDialog = false },
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                showDeleteDialog = false },
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                         ) {
@@ -902,6 +915,7 @@ fun TaskItemView(
 
                         Surface(
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 showDeleteDialog = false
                                 onDeleteTask(task)
                             },
@@ -1010,7 +1024,9 @@ fun TaskItemView(
                 )
 
                 IconButton(
-                    onClick = { showDeleteDialog = true },
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        showDeleteDialog = true },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
@@ -1234,6 +1250,7 @@ fun AddTaskSheetContent(
 
     var isDismissing by remember { mutableStateOf(false) }
     var AnimatabletranslationY = remember { Animatable(0f) }
+    val haptic = LocalHapticFeedback.current
 
     fun triggerDismiss(pendingTask: String? = null) {
         if (isDismissing) return
@@ -1368,28 +1385,29 @@ fun AddTaskSheetContent(
                         .semantics { testTag = "task_name_input" },
                     shape = RoundedCornerShape(16.dp),
                     singleLine = true,
-                    leadingIcon = {
-                        Surface(
-                            onClick = { /* TODO */ },
-                            modifier = Modifier
-                                .padding(start = 8.dp)
-                                .size(38.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.Edit,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    },
+//                    leadingIcon = {
+//                        Surface(
+//                            onClick = { /* TODO */ },
+//                            modifier = Modifier
+//                                .padding(start = 8.dp)
+//                                .size(38.dp),
+//                            shape = RoundedCornerShape(10.dp),
+//                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+//                        ) {
+//                            Box(contentAlignment = Alignment.Center) {
+//                                Icon(
+//                                    Icons.Default.Edit,
+//                                    null,
+//                                    tint = MaterialTheme.colorScheme.primary,
+//                                    modifier = Modifier.size(20.dp)
+//                                )
+//                            }
+//                        }
+//                    },
                     trailingIcon = {
                         IconButton(
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 subTasks = subTasks + SubTask()
                                 coroutineScope.launch {
                                     delay(50)
@@ -1625,7 +1643,9 @@ fun AddTaskSheetContent(
                         ) {
                             // Кнопка напоминаний (растягивается)
                             Surface(
-                                onClick = { showReminderDialog = true },
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                    showReminderDialog = true },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(43.dp),
@@ -1648,7 +1668,9 @@ fun AddTaskSheetContent(
 
                             // Кнопка "Запланировать" (фиксированный размер)
                             Surface(
-                                onClick = { if (taskName.isNotBlank()) triggerDismiss(taskName) },
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                    if (taskName.isNotBlank()) triggerDismiss(taskName) },
                                 modifier = Modifier
                                     .size(43.dp)
                                     .semantics { testTag = "add_task_button" },
@@ -1737,6 +1759,7 @@ fun EditTaskSheetContent(
     onDismiss: () -> Unit,
     onSave: (updatedTask: TaskEntity, updatedSubtasks: List<SubTaskEntity>) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
@@ -1954,27 +1977,28 @@ fun EditTaskSheetContent(
                         .focusRequester(focusRequester),
                     shape = RoundedCornerShape(16.dp),
                     singleLine = true,
-                    leadingIcon = {
-                        Surface(
-                            modifier = Modifier
-                                .padding(start = 8.dp)
-                                .size(38.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.Edit,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    },
+//                    leadingIcon = {
+//                        Surface(
+//                            modifier = Modifier
+//                                .padding(start = 8.dp)
+//                                .size(38.dp),
+//                            shape = RoundedCornerShape(10.dp),
+//                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+//                        ) {
+//                            Box(contentAlignment = Alignment.Center) {
+//                                Icon(
+//                                    Icons.Default.Edit,
+//                                    null,
+//                                    tint = MaterialTheme.colorScheme.primary,
+//                                    modifier = Modifier.size(20.dp)
+//                                )
+//                            }
+//                        }
+//                    },
                     trailingIcon = {
                         IconButton(
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 subTasks = subTasks + SubTask()
                                 coroutineScope.launch {
                                     delay(50)
@@ -2195,7 +2219,9 @@ fun EditTaskSheetContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Surface(
-                                onClick = { showReminderDialog = true },
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                    showReminderDialog = true },
                                 modifier = Modifier.weight(1f).height(43.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
@@ -2215,7 +2241,9 @@ fun EditTaskSheetContent(
                             }
 
                             Surface(
-                                onClick = { if (canSave) triggerDismiss(taskName.trim()) },
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                    if (canSave) triggerDismiss(taskName.trim()) },
                                 enabled = canSave,
                                 modifier = Modifier
                                     .size(43.dp)
@@ -2427,8 +2455,7 @@ fun ReminderPickerDialog(
     onDismiss: () -> Unit,
     onSave: (LocalDate, LocalTime, Int, ReminderUnit, Set<DayOfWeek>) -> Unit
 ) {
-    val coroutineScope = rememberCoroutineScope()
-
+    val haptic = LocalHapticFeedback.current
     var selectedDate by remember { mutableStateOf(initialDate) }
     var currentMonth by remember { mutableStateOf(initialDate.withDayOfMonth(1)) }
     var selectedTime by remember { mutableStateOf(LocalTime.now().plusHours(1)) }
@@ -2520,6 +2547,7 @@ fun ReminderPickerDialog(
 
                         TextButton(
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 val now = LocalDate.now()
                                 selectedDate = now
                                 selectedTime = LocalTime.now().plusHours(1)
@@ -2632,13 +2660,16 @@ fun ReminderPickerDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(
-                        onClick = onDismiss
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onDismiss()}
                     ) {
                         Text("Отмена", fontSize = 16.sp)
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     Button(
                         onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                             onSave(
                                 selectedDate,
                                 selectedTime,
@@ -2670,7 +2701,7 @@ fun TimeWheel(
 
     val hourState = rememberLazyListState(initialFirstVisibleItemIndex = hours.indexOf(initialHour))
     val minuteState = rememberLazyListState(initialFirstVisibleItemIndex = minutes.indexOf(initialMinute))
-
+    val haptic = LocalHapticFeedback.current
     // Прокрутка при сбросе
     LaunchedEffect(resetTrigger) {
         if (resetTrigger > 0) {
@@ -2704,8 +2735,13 @@ fun TimeWheel(
             }
         }
     }
-
+    var hasInitialized by remember { mutableStateOf(false) }
     LaunchedEffect(currentHour, currentMinute) {
+        if (!hasInitialized) {
+            hasInitialized = true
+            return@LaunchedEffect
+        }
+        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
         onTimeChanged(currentHour, currentMinute)
     }
 
@@ -2818,12 +2854,13 @@ fun CompactDatePicker(
 ) {
     var isMonthYearPickerMode by remember { mutableStateOf(false) }
     val today = LocalDate.now()
-    val interactionSource = remember { MutableInteractionSource() }
-
+    val haptic = LocalHapticFeedback.current
     Column {
         // Кнопка месяца/года с иконкой
         Button(
-            onClick = { isMonthYearPickerMode = !isMonthYearPickerMode },
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                isMonthYearPickerMode = !isMonthYearPickerMode },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
@@ -2897,12 +2934,16 @@ fun CompactDatePicker(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = { isMonthYearPickerMode = false }) {
+                    TextButton(onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        isMonthYearPickerMode = false }) {
                         Text("Отмена", fontSize = 14.sp)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = { isMonthYearPickerMode = false },
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            isMonthYearPickerMode = false },
                         shape = RoundedCornerShape(12.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
@@ -3175,7 +3216,7 @@ fun CustomDatePickerDialog(initialDate: LocalDate,
     var currentMonth by remember { mutableStateOf(initialDate.withDayOfMonth(1)) }
     var tempSelectedDate by remember { mutableStateOf(initialDate) }
     var isYearPickerMode by remember { mutableStateOf(false) }
-
+    val haptic = LocalHapticFeedback.current
     val today = LocalDate.now()
 
     AlertDialog(
@@ -3206,7 +3247,9 @@ fun CustomDatePickerDialog(initialDate: LocalDate,
                 )
 
                 TextButton(
-                    onClick = { isYearPickerMode = !isYearPickerMode },
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        isYearPickerMode = !isYearPickerMode },
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3245,6 +3288,7 @@ fun CustomDatePickerDialog(initialDate: LocalDate,
                         // Кнопка СБРОСИТЬ
                         TextButton(
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 val now = LocalDate.now()
                                 tempSelectedDate = now
                                 currentMonth = now.withDayOfMonth(1)
@@ -3254,10 +3298,14 @@ fun CustomDatePickerDialog(initialDate: LocalDate,
                         }
 
                         Row {
-                            TextButton(onClick = onDismiss) {
+                            TextButton(onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                onDismiss()}) {
                                 Text("ОТМЕНА")
                             }
-                            TextButton(onClick = { onConfirm(tempSelectedDate) }) {
+                            TextButton(onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                onConfirm(tempSelectedDate) }) {
                                 Text("ОК")
                             }
                         }
@@ -3410,10 +3458,14 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
             }
         }
     }
-
+    var hasInitialized by remember { mutableStateOf(false) }
     // ЛОГИКА ВИБРАЦИИ: Каждый раз, когда centerIndex меняется, происходит "щелчок"
     LaunchedEffect(centerIndex) {
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        if (!hasInitialized) {
+            hasInitialized = true
+            return@LaunchedEffect
+        }
+        haptic.performHapticFeedback(HapticFeedbackType.KeyboardTap)
     }
 
     val currentYear = years.getOrElse(centerIndex) { initialYear }
@@ -3493,7 +3545,9 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
-            onClick = { onYearSelected(currentYear) },
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                onYearSelected(currentYear) },
             modifier = Modifier
                 .fillMaxWidth(0.7f)
                 .height(48.dp),
@@ -3509,11 +3563,12 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
 fun <T> WheelPicker(
     items: List<T>,
     initialItem: T,
+    resetTrigger: Int = 0,
     itemHeight: Dp = 40.dp,
     visibleItems: Int = 5,
     formatter: (T) -> String = { it.toString() },
-    centerFontSize: androidx.compose.ui.unit.TextUnit = 20.sp,    // новый параметр
-    secondaryFontSize: androidx.compose.ui.unit.TextUnit = 16.sp, // новый параметр
+    centerFontSize: androidx.compose.ui.unit.TextUnit = 20.sp,
+    secondaryFontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
     onItemSelected: (T) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3521,25 +3576,30 @@ fun <T> WheelPicker(
     val density = LocalDensity.current
     val itemHeightPx = with(density) { itemHeight.toPx() }
     val viewportHeight = itemHeight * visibleItems
+    val viewportHeightPx = with(density) { viewportHeight.toPx() }
 
     val initialIndex = items.indexOf(initialItem).coerceAtLeast(0)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
 
-    LaunchedEffect(initialItem) {
-        val index = items.indexOf(initialItem)
-        if (index >= 0) {
-            listState.animateScrollToItem(index)
+    LaunchedEffect(resetTrigger) {
+        if (resetTrigger > 0) {
+            val targetIndex = items.indexOf(initialItem).coerceAtLeast(0)
+            listState.animateScrollToItem(targetIndex)
         }
     }
 
-    val centerIndex by remember {
+    val currentIndex by remember {
         derivedStateOf {
             val layoutInfo = listState.layoutInfo
             val visibleItemsInfo = layoutInfo.visibleItemsInfo
-            if (visibleItemsInfo.isEmpty()) initialIndex
-            else {
-                val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+
+            if (visibleItemsInfo.isEmpty()) {
+                initialIndex
+            } else {
+                val viewportCenter =
+                    (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+
                 visibleItemsInfo.minByOrNull { info ->
                     abs((info.offset + info.size / 2) - viewportCenter)
                 }?.index ?: initialIndex
@@ -3547,12 +3607,16 @@ fun <T> WheelPicker(
         }
     }
 
-    LaunchedEffect(centerIndex) {
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-    }
+    val currentItem = items.getOrElse(currentIndex) { initialItem }
 
-    val currentItem = items.getOrElse(centerIndex) { initialItem }
+    var hasInitialized by remember { mutableStateOf(false) }
+
     LaunchedEffect(currentItem) {
+        if (!hasInitialized) {
+            hasInitialized = true
+            return@LaunchedEffect
+        }
+        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
         onItemSelected(currentItem)
     }
 
@@ -3577,10 +3641,11 @@ fun <T> WheelPicker(
         ) {
             items(items.size) { index ->
                 val item = items[index]
-                val isCenter = index == centerIndex
+                val isCenter = index == currentIndex
                 val animatedColor by animateColorAsState(
                     targetValue = if (isCenter) MaterialTheme.colorScheme.primary else Color.Gray,
-                    animationSpec = tween(150)
+                    animationSpec = tween(150),
+                    label = "wheel_item_color"
                 )
 
                 Box(
@@ -3590,11 +3655,15 @@ fun <T> WheelPicker(
                         .graphicsLayer {
                             val firstIdx = listState.firstVisibleItemIndex
                             val firstOffset = listState.firstVisibleItemScrollOffset.toFloat()
-                            val contentPaddingPx = ((viewportHeight - itemHeight) / 2).toPx()
-                            val itemTopInViewport = (index - firstIdx) * itemHeightPx - firstOffset + contentPaddingPx
-                            val itemCenterInViewport = itemTopInViewport + (itemHeightPx / 2f)
-                            val viewCenter = viewportHeight.toPx() / 2f
-                            val dist = abs(viewCenter - itemCenterInViewport)
+                            val contentPaddingPx =
+                                ((viewportHeight - itemHeight) / 2).toPx()
+
+                            val itemTopInViewport =
+                                (index - firstIdx) * itemHeightPx - firstOffset + contentPaddingPx
+                            val itemCenterInViewport =
+                                itemTopInViewport + (itemHeightPx / 2f)
+                            val viewCenter = viewportHeightPx / 2f
+                            val dist = kotlin.math.abs(viewCenter - itemCenterInViewport)
                             val maxDist = itemHeightPx * 2.5f
 
                             if (dist < maxDist) {
