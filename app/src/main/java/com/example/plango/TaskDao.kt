@@ -314,8 +314,37 @@ interface TaskDao {
     @Query("DELETE FROM tasks WHERE source_task_id = :baseTaskId AND date_of_task = :occurrenceDate")
     suspend fun deleteOccurrenceCopy(baseTaskId: Int, occurrenceDate: Long)
 
+    @Transaction
+    suspend fun deleteOccurrenceForDate(baseTaskId: Int, occurrenceDate: Long) {
+        val existingCopy = getOccurrenceCopy(baseTaskId, occurrenceDate)
+        if (existingCopy != null) {
+            deleteTask(existingCopy)
+        }
+
+        insertOccurrenceException(
+            TaskOccurrenceExceptionEntity(
+                base_task_id = baseTaskId,
+                occurrence_date = occurrenceDate,
+                mode = RecurrenceExceptionMode.DELETED_ONLY_THIS_DAY
+            )
+        )
+    }
+
     @Query("DELETE FROM task_occurrence_exceptions WHERE base_task_id = :baseTaskId AND occurrence_date = :occurrenceDate")
     suspend fun deleteOccurrenceExceptionForDay(baseTaskId: Int, occurrenceDate: Long)
+
+    @Query("DELETE FROM tasks WHERE source_task_id = :baseTaskId AND date_of_task >= :fromDate")
+    suspend fun deleteOccurrenceCopiesFromDate(baseTaskId: Int, fromDate: Long)
+
+    @Query("DELETE FROM task_occurrence_exceptions WHERE base_task_id = :baseTaskId AND occurrence_date >= :fromDate")
+    suspend fun deleteOccurrenceExceptionsFromDate(baseTaskId: Int, fromDate: Long)
+
+    @Transaction
+    suspend fun deleteRecurringSeriesFromDate(baseTaskId: Int, fromDate: Long) {
+        endRecurringSeries(baseTaskId, fromDate - 86_400_000L)
+        deleteOccurrenceCopiesFromDate(baseTaskId, fromDate)
+        deleteOccurrenceExceptionsFromDate(baseTaskId, fromDate)
+    }
 
     @Insert
     suspend fun insertOccurrenceException(exception: TaskOccurrenceExceptionEntity): Long

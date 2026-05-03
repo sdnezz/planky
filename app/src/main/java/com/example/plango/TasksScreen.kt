@@ -173,6 +173,11 @@ private data class RecurringEditRequest(
     val updatedSubtasks: List<SubTaskEntity>
 )
 
+enum class RecurrenceDeleteScope {
+    ONLY_THIS_DAY,
+    THIS_AND_FUTURE
+}
+
 private fun TaskEntity.isRecurringSeries(): Boolean =
     source_task_id == null && (
             repeat_mon || repeat_tue || repeat_wed || repeat_thu ||
@@ -225,7 +230,9 @@ private fun TaskEntity.sameMetaAs(other: TaskEntity): Boolean {
             repeat_thu == other.repeat_thu &&
             repeat_fri == other.repeat_fri &&
             repeat_sat == other.repeat_sat &&
-            repeat_sun == other.repeat_sun
+            repeat_sun == other.repeat_sun &&
+            deadline_time_minutes == other.deadline_time_minutes &&
+            remind_before_minutes == other.remind_before_minutes
 }
 
 private fun List<SubTaskEntity>.sameContentAs(other: List<SubTaskEntity>): Boolean {
@@ -827,15 +834,30 @@ fun TaskListPage(
                                 }
                             }
                         },
-                        onDeleteTask = { taskToDelete ->
+                        onDeleteTask = { taskToDelete, deleteScope ->
                             coroutineScope.launch {
-                                if (item.task.isRecurringSeries()) {
-                                    taskDao.deleteOccurrenceForDate(
-                                        baseTask = item.task,
-                                        occurrenceDate = startOfDay
-                                    )
-                                } else {
-                                    taskDao.deleteTask(taskToDelete)
+                                val baseTaskId = taskToDelete.source_task_id ?: taskToDelete.id
+                                val occurrenceDate = taskToDelete.date_of_task
+
+                                when (deleteScope) {
+                                    RecurrenceDeleteScope.ONLY_THIS_DAY -> {
+                                        if (taskToDelete.repeat_mon || taskToDelete.repeat_tue || taskToDelete.repeat_wed ||
+                                            taskToDelete.repeat_thu || taskToDelete.repeat_fri || taskToDelete.repeat_sat ||
+                                            taskToDelete.repeat_sun
+                                        ) {
+                                            taskDao.deleteOccurrenceForDate(baseTaskId, occurrenceDate)
+                                        } else {
+                                            taskDao.deleteTask(taskToDelete)
+                                        }
+                                    }
+
+                                    RecurrenceDeleteScope.THIS_AND_FUTURE -> {
+                                        taskDao.deleteRecurringSeriesFromDate(baseTaskId, occurrenceDate)
+                                    }
+
+                                    null -> {
+                                        taskDao.deleteTask(taskToDelete)
+                                    }
                                 }
                             }
                         }
@@ -855,12 +877,17 @@ fun TaskItemView(
     onToggleCompleted: (TaskEntity, List<SubTaskEntity>) -> Unit,
     onSubtaskToggle: (SubTaskEntity) -> Unit,
     onDragStopped: () -> Unit,
-    onDeleteTask: (TaskEntity) -> Unit
+    onDeleteTask: (TaskEntity, RecurrenceDeleteScope?) -> Unit
 ) {
     var showDeleteDialog by remember(task.id) { mutableStateOf(false) }
+    var showRecurringDeleteDialog by remember(task.id) { mutableStateOf(false) }
+    val isRecurring = task.repeat_mon || task.repeat_tue || task.repeat_wed ||
+            task.repeat_thu || task.repeat_fri || task.repeat_sat || task.repeat_sun
+
     var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
     val activeGreen = Color(0xFF4CAF50)
     val haptic = LocalHapticFeedback.current
+
     if (showDeleteDialog) {
         Dialog(
             onDismissRequest = { showDeleteDialog = false }
@@ -917,7 +944,7 @@ fun TaskItemView(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 showDeleteDialog = false
-                                onDeleteTask(task)
+                                onDeleteTask(task, null)
                             },
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.error
@@ -931,6 +958,98 @@ fun TaskItemView(
                                     color = Color.White,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 14.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showRecurringDeleteDialog) {
+        Dialog(onDismissRequest = {
+            showRecurringDeleteDialog = false
+        }) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(20.dp)
+                        .widthIn(min = 280.dp, max = 360.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Удалить повторяющуюся задачу",
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                showRecurringDeleteDialog = false
+                                onDeleteTask(task, RecurrenceDeleteScope.ONLY_THIS_DAY)
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 14.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Только на сегодня", color = Color.White)
+                            }
+                        }
+
+                        Surface(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                showRecurringDeleteDialog = false
+                                onDeleteTask(task, RecurrenceDeleteScope.THIS_AND_FUTURE)
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 14.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("И все последующие", color = Color.White)
+                            }
+                        }
+
+                        Surface(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                showRecurringDeleteDialog = false },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Отмена",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -1026,7 +1145,7 @@ fun TaskItemView(
                 IconButton(
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        showDeleteDialog = true },
+                        if (isRecurring) showRecurringDeleteDialog = true else showDeleteDialog = true },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
@@ -1251,6 +1370,12 @@ fun AddTaskSheetContent(
     var isDismissing by remember { mutableStateOf(false) }
     var AnimatabletranslationY = remember { Animatable(0f) }
     val haptic = LocalHapticFeedback.current
+
+    val isRecurring = selectedDays.isNotEmpty()
+    val recurringDeadlineTimeMinutes = deadlineDateTime?.let { it.hour * 60 + it.minute }
+    val recurringRemindBeforeMinutes = if (isRecurring && deadlineDateTime != null && remindDateTime != null) {
+        Duration.between(remindDateTime, deadlineDateTime).toMinutes().toInt().coerceAtLeast(0)
+    } else null
 
     fun triggerDismiss(pendingTask: String? = null) {
         if (isDismissing) return
@@ -1690,27 +1815,29 @@ fun AddTaskSheetContent(
                                     )
                                 }
                             }
+                            val defaultReminderDate = LocalDate.now()
+                            val defaultReminderTime = LocalTime.now().plusHours(1)
+                            val defaultRemindBeforeValue = 5
+                            val defaultRemindBeforeUnit = ReminderUnit.MINUTES
+                            val defaultSelectedWeekdays = emptySet<DayOfWeek>()
                             if (showReminderDialog) {
                                 ReminderPickerDialog(
-                                    initialDate = LocalDate.now(), // или сохранённое значение
-                                    initialTime = LocalTime.now().plusHours(1),
+                                    initialDate = defaultReminderDate,
+                                    initialTime = defaultReminderTime,
+                                    initialRemindBeforeValue = defaultRemindBeforeValue,
+                                    initialRemindBeforeUnit = defaultRemindBeforeUnit,
+                                    initialSelectedWeekdays = defaultSelectedWeekdays,
                                     onDismiss = { showReminderDialog = false },
                                     onSave = { date, time, remindValue, remindUnit, weekdays ->
-                                        // 1. Сохраняем дедлайн (дата + время)
                                         val deadline = LocalDateTime.of(date, time)
                                         deadlineDateTime = deadline
-
-                                        // 2. Сохраняем дни повтора
                                         selectedDays = weekdays
-
-                                        // 3. Вычисляем время напоминания
                                         remindDateTime = when (remindUnit) {
                                             ReminderUnit.MINUTES -> deadline.minusMinutes(remindValue.toLong())
                                             ReminderUnit.HOURS -> deadline.minusHours(remindValue.toLong())
                                             ReminderUnit.DAYS -> deadline.minusDays(remindValue.toLong())
                                             else -> deadline
                                         }
-
                                         showReminderDialog = false
                                     }
                                 )
@@ -1820,6 +1947,18 @@ fun EditTaskSheetContent(
     var AnimatabletranslationY = remember { Animatable(0f) }
     val canSave = taskName.trim().isNotEmpty()
 
+    val isRecurring = task.repeat_mon || task.repeat_tue || task.repeat_wed ||
+            task.repeat_thu || task.repeat_fri || task.repeat_sat || task.repeat_sun ||
+            task.source_task_id != null
+
+    val recurringDeadlineTimeMinutes = deadlineDateTime?.let {
+        it.hour * 60 + it.minute
+    }
+
+    val recurringRemindBeforeMinutes = if (deadlineDateTime != null && remindDateTime != null) {
+        Duration.between(remindDateTime, deadlineDateTime).toMinutes().toInt().coerceAtLeast(0)
+    } else null
+
     fun triggerDismiss(pendingTask: String? = null) {
         if (isDismissing) return
         isDismissing = true
@@ -1842,8 +1981,11 @@ fun EditTaskSheetContent(
                         ?.toInstant()
                         ?.toEpochMilli(),
                     remind_date = remindDateTime
-                        ?.toInstant(ZoneOffset.UTC)
+                        ?.atZone(ZoneId.systemDefault())
+                        ?.toInstant()
                         ?.toEpochMilli(),
+                    deadline_time_minutes = if (isRecurring) recurringDeadlineTimeMinutes else null,
+                    remind_before_minutes = if (isRecurring) recurringRemindBeforeMinutes else null,
                     repeat_mon = selectedDays.contains(DayOfWeek.MONDAY),
                     repeat_tue = selectedDays.contains(DayOfWeek.TUESDAY),
                     repeat_wed = selectedDays.contains(DayOfWeek.WEDNESDAY),
@@ -2266,11 +2408,47 @@ fun EditTaskSheetContent(
             }
         }
     }
+    val initialReminderDate = deadlineDateTime?.toLocalDate() ?: LocalDate.now()
+    val initialReminderTime = deadlineDateTime?.toLocalTime() ?: LocalTime.now().plusHours(1)
+
+    val initialRemindBeforeValue = when {
+        task.remind_before_minutes != null -> {
+            val minutes = task.remind_before_minutes
+            when {
+                minutes % (60 * 24) == 0 -> minutes / (60 * 24)
+                minutes % 60 == 0 -> minutes / 60
+                else -> minutes
+            }
+        }
+        task.deadline_date != null && task.remind_date != null -> {
+            val diffMinutes = Duration.between(
+                Instant.ofEpochMilli(task.remind_date).atZone(ZoneId.systemDefault()).toLocalDateTime(),
+                Instant.ofEpochMilli(task.deadline_date).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            ).toMinutes().toInt().coerceAtLeast(0)
+            diffMinutes
+        }
+        else -> 5
+    }
+
+    val initialRemindBeforeUnit = when {
+        task.remind_before_minutes != null -> {
+            val minutes = task.remind_before_minutes
+            when {
+                minutes % (60 * 24) == 0 -> ReminderUnit.DAYS
+                minutes % 60 == 0 -> ReminderUnit.HOURS
+                else -> ReminderUnit.MINUTES
+            }
+        }
+        else -> ReminderUnit.MINUTES
+    }
 
     if (showReminderDialog) {
         ReminderPickerDialog(
-            initialDate = deadlineDateTime?.toLocalDate() ?: LocalDate.now(),
-            initialTime = deadlineDateTime?.toLocalTime() ?: LocalTime.now().plusHours(1),
+            initialDate = initialReminderDate,
+            initialTime = initialReminderTime,
+            initialRemindBeforeValue = initialRemindBeforeValue,
+            initialRemindBeforeUnit = initialRemindBeforeUnit,
+            initialSelectedWeekdays = selectedDays,
             onDismiss = { showReminderDialog = false },
             onSave = { date, time, remindValue, remindUnit, weekdays ->
                 val deadline = LocalDateTime.of(date, time)
@@ -2452,16 +2630,19 @@ fun GoalItem(text: String, isSelected: Boolean, onClick: () -> Unit) {
 fun ReminderPickerDialog(
     initialDate: LocalDate,
     initialTime: LocalTime,
+    initialRemindBeforeValue: Int,
+    initialRemindBeforeUnit: ReminderUnit,
+    initialSelectedWeekdays: Set<DayOfWeek>,
     onDismiss: () -> Unit,
     onSave: (LocalDate, LocalTime, Int, ReminderUnit, Set<DayOfWeek>) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
     var selectedDate by remember { mutableStateOf(initialDate) }
     var currentMonth by remember { mutableStateOf(initialDate.withDayOfMonth(1)) }
-    var selectedTime by remember { mutableStateOf(LocalTime.now().plusHours(1)) }
-    var remindBeforeValue by remember { mutableStateOf(5) }
-    var remindBeforeUnit by remember { mutableStateOf(ReminderUnit.MINUTES) }
-    var selectedWeekdays by remember { mutableStateOf<Set<DayOfWeek>>(emptySet()) }
+    var selectedTime by remember(initialTime) { mutableStateOf(initialTime) }
+    var remindBeforeValue by remember(initialRemindBeforeValue) { mutableIntStateOf(initialRemindBeforeValue) }
+    var remindBeforeUnit by remember(initialRemindBeforeUnit) { mutableStateOf(initialRemindBeforeUnit) }
+    var selectedWeekdays by remember(initialSelectedWeekdays) { mutableStateOf(initialSelectedWeekdays) }
     var resetTimeTrigger by remember { mutableIntStateOf(0) }
 
 
