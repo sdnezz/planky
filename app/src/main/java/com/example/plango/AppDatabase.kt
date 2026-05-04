@@ -8,11 +8,17 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [TaskEntity::class, SubTaskEntity::class, TaskOccurrenceExceptionEntity::class],
-    version = 3
+    entities = [
+        TaskEntity::class,
+        SubTaskEntity::class,
+        TaskOccurrenceExceptionEntity::class,
+        AppSettingsEntity::class
+    ],
+    version = 4
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
+    abstract fun settingsDao(): SettingsDao
 
     companion object {
         @Volatile
@@ -25,7 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "plango_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                 INSTANCE = instance
                 instance
@@ -57,6 +63,17 @@ abstract class AppDatabase : RoomDatabase() {
 
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_task_occurrence_exceptions_base_task_id ON task_occurrence_exceptions(base_task_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_task_occurrence_exceptions_occurrence_date ON task_occurrence_exceptions(occurrence_date)")
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS app_settings (
+                        id INTEGER PRIMARY KEY NOT NULL,
+                        chronotype TEXT
+                    )
+                """.trimIndent())
             }
         }
     }
