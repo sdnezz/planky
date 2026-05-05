@@ -55,7 +55,7 @@ object TaskPrioritizer {
     }
 
     private fun chronoScore(complexity: Int, period: String): Double {
-        val norm = (complexity / 10.0).coerceIn(0.0, 1.0)
+        val norm = (complexity / 5.0).coerceIn(0.0, 1.0)
         val w = when (period) {
             "peak" -> 1.0
             "normal" -> 0.5
@@ -65,7 +65,7 @@ object TaskPrioritizer {
     }
 
     private fun risk(complexity: Int, deadlineScore: Double): Double {
-        val norm = (complexity / 10.0).coerceIn(0.0, 1.0)
+        val norm = (complexity / 5.0).coerceIn(0.0, 1.0)
         return norm * deadlineScore
     }
 
@@ -99,11 +99,7 @@ object TaskPrioritizer {
             val c = chronoScore(complexity, period)
             val r = risk(complexity, d)
 
-            val priority =
-                0.30 * e +
-                        0.40 * d +
-                        0.15 * c +
-                        0.15 * r
+            val priority = 0.30 * e + 0.40 * d + 0.15 * c + 0.15 * r
 
             scored.add(id to priority)
         }
