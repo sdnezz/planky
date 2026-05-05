@@ -163,6 +163,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
+import org.json.JSONObject
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -276,6 +277,7 @@ fun TasksScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
     val taskDao = db.taskDao()
+    val settingsDao = db.settingsDao()
 
     // Получаем задачи для БД (в реальном приложении лучше через ViewModel)
     val startOfDay = selectedDate.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
@@ -400,17 +402,36 @@ fun TasksScreen() {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
-            text = if (selectedDate == today) "Задачи на сегодня"
-            else "Задачи на ${selectedDate.dayOfMonth} ${
-                selectedDate.month.getDisplayName(
-                    DateTextStyle.FULL,
-                    Locale("ru")
-                )
-            }",
-            fontWeight = FontWeight.Medium,
-            color = Color.Gray
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (selectedDate == today) "Задачи на сегодня"
+                else "Задачи на ${selectedDate.dayOfMonth} ${
+                    selectedDate.month.getDisplayName(DateTextStyle.FULL, Locale("ru"))
+                }",
+                fontWeight = FontWeight.Medium,
+                color = Color.Gray
+            )
+
+            TextButton(
+                onClick = {
+                    coroutineScope.launch {
+                        prioritizeDayTasks(
+                            taskDao = taskDao,
+                            settingsDao = settingsDao,
+                            tasks = tasksList,
+                            selectedDate = selectedDate
+                        )
+                    }
+                },
+                enabled = tasksList.isNotEmpty()
+            ) {
+                Text("Приоритизировать")
+            }
+        }
 
         Box(modifier = Modifier.weight(1f)) {
             HorizontalPager(
@@ -713,6 +734,30 @@ fun TasksScreen() {
     }
 }
 //}
+
+private suspend fun prioritizeDayTasks(
+    taskDao: TaskDao,
+    settingsDao: SettingsDao,
+    tasks: List<TaskWithSubtasks>,
+    selectedDate: LocalDate
+) {
+    val chronotype = settingsDao.getSettings()?.chronotype ?: "intermediate"
+
+    // Для повторяющихся задач берём копию именно для выбранного дня,
+    // чтобы дедлайн и напоминание были корректны именно для этой даты.
+    val tasksForPriority = tasks.map { item ->
+        if (item.task.isRecurringSeries()) {
+            item.copy(task = item.task.toDisplayCopyForDate(selectedDate))
+        } else {
+            item
+        }
+    }
+
+    val payload = buildPrioritizationJson(tasksForPriority, chronotype)
+    val orderedIds = TaskPrioritizer.prioritize(payload)
+
+    taskDao.updateTaskPositionsByOrder(orderedIds)
+}
 
 fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
     if (deadlineMs == null || deadlineMs == 0L) return null

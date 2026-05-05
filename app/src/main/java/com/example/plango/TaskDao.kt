@@ -103,6 +103,7 @@ interface TaskDao {
                 )
             )
     """)
+
     fun getTasksWithSubtasksForDay(
         startOfDay: Long,
         endOfDay: Long,
@@ -261,6 +262,15 @@ interface TaskDao {
         WHERE id = :taskId
     """)
     suspend fun updateTaskPosition(taskId: Int, newPosition: Int)
+
+    @Transaction
+    suspend fun updateTaskPositionsByOrder(orderedIds: List<Int>) {
+        if (orderedIds.isEmpty()) return
+
+        orderedIds.forEachIndexed { index, id ->
+            updateTaskPosition(id, index + 1)
+        }
+    }
 
     @Transaction
     suspend fun updatePositionsOnReorder(
