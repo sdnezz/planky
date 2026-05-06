@@ -244,12 +244,15 @@ private fun List<SubTaskEntity>.sameContentAs(other: List<SubTaskEntity>): Boole
 }
 
 @Composable
-fun TasksScreen() {
+fun TasksScreen(
+    onOpenSettings: () -> Unit = {}
+) {
     val haptic = LocalHapticFeedback.current
 
     var showAddTaskSheet by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<TaskWithSubtasks?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var showChronotypeRequiredDialog by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val today = LocalDate.now()
 
@@ -278,6 +281,8 @@ fun TasksScreen() {
     val db = remember { AppDatabase.getDatabase(context) }
     val taskDao = db.taskDao()
     val settingsDao = db.settingsDao()
+
+    val chronotype by settingsDao.observeChronotype().collectAsState(initial = null)
 
     // Получаем задачи для БД (в реальном приложении лучше через ViewModel)
     val startOfDay = selectedDate.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
@@ -418,13 +423,17 @@ fun TasksScreen() {
 
             TextButton(
                 onClick = {
-                    coroutineScope.launch {
-                        prioritizeDayTasks(
-                            taskDao = taskDao,
-                            settingsDao = settingsDao,
-                            tasks = tasksList,
-                            selectedDate = selectedDate
-                        )
+                    if (chronotype.isNullOrBlank()) {
+                        showChronotypeRequiredDialog = true
+                    } else {
+                        coroutineScope.launch {
+                            prioritizeDayTasks(
+                                taskDao = taskDao,
+                                settingsDao = settingsDao,
+                                tasks = tasksList,
+                                selectedDate = selectedDate
+                            )
+                        }
                     }
                 },
                 enabled = tasksList.isNotEmpty()
@@ -725,6 +734,77 @@ fun TasksScreen() {
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showChronotypeRequiredDialog) {
+        Dialog(
+            onDismissRequest = { showChronotypeRequiredDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp)
+                        .wrapContentWidth()
+                        .wrapContentHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Задайте хронотип для приоритизации",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally)
+                    ) {
+                        Surface(
+                            onClick = { showChronotypeRequiredDialog = false },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Отмена",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = {
+                                showChronotypeRequiredDialog = false
+                                onOpenSettings()
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Задать",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
                     }

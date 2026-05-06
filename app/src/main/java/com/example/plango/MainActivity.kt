@@ -77,7 +77,9 @@ fun MainScreen() {
         {
             when (selectedItem) {
                 0 -> GoalsScreen()
-                1 -> TasksScreen()
+                1 -> TasksScreen(
+                    onOpenSettings = {selectedItem = 2}
+                )
                 2 -> SettingsScreen()
             }
         }
