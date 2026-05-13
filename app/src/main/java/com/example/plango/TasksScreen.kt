@@ -158,9 +158,11 @@ import java.time.Instant
 import java.time.ZoneId
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.text.style.TextAlign
+import com.example.plango.TaskPrioritizer.toPriorityInput
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import org.json.JSONObject
@@ -179,13 +181,13 @@ enum class RecurrenceDeleteScope {
     THIS_AND_FUTURE
 }
 
-private fun TaskEntity.isRecurringSeries(): Boolean =
+fun TaskEntity.isRecurringSeries(): Boolean =
     source_task_id == null && (
             repeat_mon || repeat_tue || repeat_wed || repeat_thu ||
                     repeat_fri || repeat_sat || repeat_sun
             )
 
-private fun TaskEntity.toDisplayCopyForDate(date: LocalDate): TaskEntity {
+fun TaskEntity.toDisplayCopyForDate(date: LocalDate): TaskEntity {
     val baseTimeMinutes = deadline_time_minutes ?: deadline_date?.let {
         val zdt = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
         zdt.hour * 60 + zdt.minute
@@ -253,8 +255,12 @@ fun TasksScreen(
     var editingTask by remember { mutableStateOf<TaskWithSubtasks?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showChronotypeRequiredDialog by remember { mutableStateOf(false) }
+    var showPriorityInfoDialog by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val today = LocalDate.now()
+
+    var lastPrioritizationRun by remember { mutableStateOf<PriorityRun?>(null) }
+    var lastPrioritizationAdvice by remember { mutableStateOf("") }
 
     // Создаем CoroutineScope для управления прокруткой пейджера
     val coroutineScope = rememberCoroutineScope()
@@ -421,18 +427,30 @@ fun TasksScreen(
                 color = Color.Gray
             )
 
+            IconButton(
+                onClick = { showPriorityInfoDialog = true }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "О приоритизации",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+
             TextButton(
                 onClick = {
                     if (chronotype.isNullOrBlank()) {
                         showChronotypeRequiredDialog = true
                     } else {
                         coroutineScope.launch {
-                            prioritizeDayTasks(
+                            val run = prioritizeDayTasks(
                                 taskDao = taskDao,
                                 settingsDao = settingsDao,
                                 tasks = tasksList,
                                 selectedDate = selectedDate
                             )
+
+                            lastPrioritizationAdvice = adviceDebug(run)
                         }
                     }
                 },
@@ -470,6 +488,70 @@ fun TasksScreen(
                     .padding(bottom = 16.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
+            }
+        }
+    }
+
+    if (showPriorityInfoDialog) {
+        Dialog(
+            onDismissRequest = { showPriorityInfoDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp,
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier
+                    .widthIn(min = 280.dp, max = 350.dp)
+                    .heightIn(max = 520.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(20.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "О приоритизации",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Приоритизация перестраивает порядок задач так, чтобы более важные, срочные и лучше подходящие под ваше текущее состояние задачи поднимались выше. " +
+                                "На итоговый приоритет сильнее всего влияют важность и срочность, затем дедлайн, затем соответствие сложности текущему периоду продуктивности и риск не успеть.",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 20.sp
+                    )
+
+                    if (lastPrioritizationAdvice.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "Пояснение по последней приоритизации",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = lastPrioritizationAdvice,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 20.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+                }
             }
         }
     }
@@ -820,11 +902,9 @@ private suspend fun prioritizeDayTasks(
     settingsDao: SettingsDao,
     tasks: List<TaskWithSubtasks>,
     selectedDate: LocalDate
-) {
+): PriorityRun {
     val chronotype = settingsDao.getSettings()?.chronotype ?: "intermediate"
 
-    // Для повторяющихся задач берём копию именно для выбранного дня,
-    // чтобы дедлайн и напоминание были корректны именно для этой даты.
     val tasksForPriority = tasks.map { item ->
         if (item.task.isRecurringSeries()) {
             item.copy(task = item.task.toDisplayCopyForDate(selectedDate))
@@ -833,10 +913,16 @@ private suspend fun prioritizeDayTasks(
         }
     }
 
-    val payload = buildPrioritizationJson(tasksForPriority, chronotype)
-    val orderedIds = TaskPrioritizer.prioritize(payload)
+    val inputs = tasksForPriority.map { it.toPriorityInput(selectedDate) }
 
-    taskDao.updateTaskPositionsByOrder(orderedIds)
+    val run = TaskPrioritizer.prioritize(
+        tasks = inputs,
+        chronotype = chronotype
+    )
+
+    taskDao.updateTaskPositionsByOrder(run.orderedIds)
+
+    return run
 }
 
 fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
