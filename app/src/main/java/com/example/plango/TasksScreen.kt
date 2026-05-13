@@ -41,7 +41,6 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,6 +48,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -160,7 +160,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.Menu
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import com.example.plango.TaskPrioritizer.toPriorityInput
 import kotlinx.collections.immutable.toImmutableList
@@ -414,30 +414,30 @@ fun TasksScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (selectedDate == today) "Задачи на сегодня"
-                else "Задачи на ${selectedDate.dayOfMonth} ${
-                    selectedDate.month.getDisplayName(DateTextStyle.FULL, Locale("ru"))
-                }",
+                text = if (selectedDate == today) {
+                    "Задачи на сегодня"
+                } else {
+                    "Задачи на ${selectedDate.dayOfMonth} ${
+                        selectedDate.month.getDisplayName(DateTextStyle.FULL, Locale("ru"))
+                    }"
+                },
                 fontWeight = FontWeight.Medium,
-                color = Color.Gray
+                color = Color.Gray,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
             )
 
-            IconButton(
-                onClick = { showPriorityInfoDialog = true }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "О приоритизации",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
+            Spacer(modifier = Modifier.width(10.dp))
 
-            TextButton(
+            Surface(
                 onClick = {
                     if (chronotype.isNullOrBlank()) {
                         showChronotypeRequiredDialog = true
@@ -449,14 +449,54 @@ fun TasksScreen(
                                 tasks = tasksList,
                                 selectedDate = selectedDate
                             )
-
                             lastPrioritizationAdvice = adviceDebug(run)
                         }
                     }
                 },
-                enabled = tasksList.isNotEmpty()
+                enabled = tasksList.isNotEmpty(),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                ),
+                modifier = Modifier.alpha(if (tasksList.isNotEmpty()) 1f else 0.35f)
             ) {
-                Text("Приоритизировать")
+                Row(
+                    modifier = Modifier.padding(start = 10.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Приоритизировать",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(RoundedCornerShape(36.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                RoundedCornerShape(36.dp)
+                            )
+                            .clickable { showPriorityInfoDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "О приоритизации",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
 
