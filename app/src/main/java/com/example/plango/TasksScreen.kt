@@ -287,6 +287,8 @@ fun TasksScreen(
     val db = remember { AppDatabase.getDatabase(context) }
     val taskDao = db.taskDao()
     val settingsDao = db.settingsDao()
+    val goalDao = db.goalDao()
+    val goals by goalDao.observeGoals().collectAsState(initial = emptyList())
 
     val chronotype by settingsDao.observeChronotype().collectAsState(initial = null)
 
@@ -599,7 +601,8 @@ fun TasksScreen(
     if (showAddTaskSheet) {
         AddTaskDialog(
             onDismiss = { showAddTaskSheet = false },
-            onTaskAdded = { title, important, urgent, diff, subTasksList, deadline, remind, weekdays ->
+            goals = goals,
+            onTaskAdded = { title, important, urgent, diff, subTasksList, goal_id,deadline, remind, weekdays ->
                 coroutineScope.launch {
                     val startOfDay = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
                     val endOfDay = selectedDate.atTime(LocalTime.MAX).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
@@ -634,6 +637,7 @@ fun TasksScreen(
                         is_urgency = urgent,
                         difficulty = if (diff == 0) 1 else diff,
                         is_completed = false,
+                        goal_id = goal_id,
                         deadline_date = deadline?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
                         remind_date = remind?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
                         repeat_mon = weekdays.contains(DayOfWeek.MONDAY),
@@ -695,6 +699,7 @@ fun TasksScreen(
     if (editingTask != null) {
         EditTaskDialog(
             taskWithSubtasks = editingTask!!,
+            goals = goals,
             onDismiss = { editingTask = null },
             onSave = { updatedTask, updatedSubtasks ->
                 val original = editingTask!!
@@ -1541,13 +1546,15 @@ fun StatusTag(
 @Composable
 fun AddTaskDialog(
     onDismiss: () -> Unit,
+    goals: List<GoalEntity>,
     onTaskAdded: (
         title: String,
         important: Boolean,
         urgent: Boolean,
         difficulty: Int,
         subTasks: List<SubTask>,
-        deadline: LocalDateTime?,   // Добавлено
+        goal_id: Int?,
+        deadline: LocalDateTime?,
         remind: LocalDateTime?,     // Добавлено
         weekdays: Set<DayOfWeek>    // Добавлено
     ) -> Unit
@@ -1567,6 +1574,7 @@ fun AddTaskDialog(
         ) {
             AddTaskSheetContent(
                 onDismiss = onDismiss,
+                goals = goals,
                 onTaskAdded = onTaskAdded
             )
         }
@@ -1577,12 +1585,14 @@ fun AddTaskDialog(
 @Composable
 fun AddTaskSheetContent(
     onDismiss: () -> Unit,
+    goals: List<GoalEntity>,
     onTaskAdded: (
         title: String,
         important: Boolean,
         urgent: Boolean,
         difficulty: Int,
         subTasks: List<SubTask>,
+        goal_id: Int?,
         deadline: LocalDateTime?,   // Добавлено
         remind: LocalDateTime?,     // Добавлено
         weekdays: Set<DayOfWeek>    // Добавлено
@@ -1613,7 +1623,7 @@ fun AddTaskSheetContent(
     var difficulty by remember { mutableIntStateOf(1) }
 
     // Цель
-    var selectedGoal by remember { mutableStateOf<String?>(null) }
+    var selectedGoalId by remember { mutableStateOf<Int?>(null) }
     var showGoalSelector by remember { mutableStateOf(false) }
 
     // Для позиционирования Popup
@@ -1646,7 +1656,7 @@ fun AddTaskSheetContent(
             )
             pendingTask?.let {
                 onTaskAdded(it
-                    , isImportant, isUrgent, difficulty, subTasks,
+                    , isImportant, isUrgent, difficulty, subTasks, selectedGoalId,
                     deadlineDateTime, remindDateTime, selectedDays
                 )}
             onDismiss()
@@ -1768,25 +1778,6 @@ fun AddTaskSheetContent(
                         .semantics { testTag = "task_name_input" },
                     shape = RoundedCornerShape(16.dp),
                     singleLine = true,
-//                    leadingIcon = {
-//                        Surface(
-//                            onClick = { /* TODO */ },
-//                            modifier = Modifier
-//                                .padding(start = 8.dp)
-//                                .size(38.dp),
-//                            shape = RoundedCornerShape(10.dp),
-//                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-//                        ) {
-//                            Box(contentAlignment = Alignment.Center) {
-//                                Icon(
-//                                    Icons.Default.Edit,
-//                                    null,
-//                                    tint = MaterialTheme.colorScheme.primary,
-//                                    modifier = Modifier.size(20.dp)
-//                                )
-//                            }
-//                        }
-//                    },
                     trailingIcon = {
                         IconButton(
                             onClick = {
@@ -1939,9 +1930,9 @@ fun AddTaskSheetContent(
 
                             // Кнопка цели (занимает оставшееся место)
                             Box(modifier = Modifier.weight(1f)) {
-                                val goalText = selectedGoal ?: "Цель"
+                                val selectedGoalTitle = goals.firstOrNull { it.id == selectedGoalId }?.title ?: "Цель"
                                 val displayGoalText =
-                                    if (goalText.length > 15) goalText.take(15) + "…" else goalText
+                                    if (selectedGoalTitle.length > 15) selectedGoalTitle.take(15) + "…" else selectedGoalTitle
 
                                 Surface(
                                     onClick = { showGoalSelector = true },
@@ -1997,17 +1988,15 @@ fun AddTaskSheetContent(
                                             border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f))
                                         ) {
                                             Column(modifier = Modifier.width(300.dp).padding(3.dp)) {
-                                                GoalItem("Без цели", selectedGoal == null) {
-                                                    selectedGoal = null
+                                                GoalItem("Без цели", selectedGoalId == null) {
+                                                    selectedGoalId = null
                                                     showGoalSelector = false
                                                 }
-                                                GoalItem("Работа", selectedGoal == "Работа") {
-                                                    selectedGoal = "Работа"
-                                                    showGoalSelector = false
-                                                }
-                                                GoalItem("Личное", selectedGoal == "Личное") {
-                                                    selectedGoal = "Личное"
-                                                    showGoalSelector = false
+                                                goals.forEach { goal ->
+                                                    GoalItem(goal.title, selectedGoalId == goal.id) {
+                                                        selectedGoalId = goal.id
+                                                        showGoalSelector = false
+                                                    }
                                                 }
                                             }
                                         }
@@ -2112,6 +2101,7 @@ fun AddTaskSheetContent(
 @Composable
 fun EditTaskDialog(
     taskWithSubtasks: TaskWithSubtasks,
+    goals: List<GoalEntity>,
     onDismiss: () -> Unit,
     onSave: (updatedTask: TaskEntity, updatedSubtasks: List<SubTaskEntity>) -> Unit
 ) {
@@ -2130,6 +2120,7 @@ fun EditTaskDialog(
         ) {
             EditTaskSheetContent(
                 taskWithSubtasks = taskWithSubtasks,
+                goals = goals,
                 onDismiss = onDismiss,
                 onSave = onSave
             )
@@ -2141,6 +2132,7 @@ fun EditTaskDialog(
 @Composable
 fun EditTaskSheetContent(
     taskWithSubtasks: TaskWithSubtasks,
+    goals: List<GoalEntity>,
     onDismiss: () -> Unit,
     onSave: (updatedTask: TaskEntity, updatedSubtasks: List<SubTaskEntity>) -> Unit
 ) {
@@ -2193,7 +2185,7 @@ fun EditTaskSheetContent(
     var isUrgent by remember(task.id) { mutableStateOf(task.is_urgency == true) }
     var difficulty by remember(task.id) { mutableIntStateOf(task.difficulty ?: 0) }
 
-    var selectedGoal by remember(task.id) { mutableStateOf<String?>(null) }
+    var selectedGoalId by remember(task.id) { mutableStateOf(task.goal_id) }
     var showGoalSelector by remember(task.id) { mutableStateOf(false) }
     var goalButtonBounds by remember(task.id) { mutableStateOf<Rect?>(null) }
 
@@ -2238,6 +2230,7 @@ fun EditTaskSheetContent(
                         ?.atZone(ZoneId.systemDefault())
                         ?.toInstant()
                         ?.toEpochMilli(),
+                    goal_id = selectedGoalId,
                     remind_date = remindDateTime
                         ?.atZone(ZoneId.systemDefault())
                         ?.toInstant()
@@ -2377,24 +2370,6 @@ fun EditTaskSheetContent(
                         .focusRequester(focusRequester),
                     shape = RoundedCornerShape(16.dp),
                     singleLine = true,
-//                    leadingIcon = {
-//                        Surface(
-//                            modifier = Modifier
-//                                .padding(start = 8.dp)
-//                                .size(38.dp),
-//                            shape = RoundedCornerShape(10.dp),
-//                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-//                        ) {
-//                            Box(contentAlignment = Alignment.Center) {
-//                                Icon(
-//                                    Icons.Default.Edit,
-//                                    null,
-//                                    tint = MaterialTheme.colorScheme.primary,
-//                                    modifier = Modifier.size(20.dp)
-//                                )
-//                            }
-//                        }
-//                    },
                     trailingIcon = {
                         IconButton(
                             onClick = {
@@ -2538,7 +2513,7 @@ fun EditTaskSheetContent(
                             Spacer(modifier = Modifier.width(8.dp))
 
                             Box(modifier = Modifier.weight(1f)) {
-                                val goalText = selectedGoal ?: "Цель"
+                                val selectedGoalTitle = goals.firstOrNull { it.id == selectedGoalId }?.title ?: "Цель"
                                 Surface(
                                     onClick = { showGoalSelector = true },
                                     modifier = Modifier
@@ -2563,7 +2538,7 @@ fun EditTaskSheetContent(
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            if (goalText.length > 15) goalText.take(15) + "…" else goalText,
+                                            if (selectedGoalTitle.length > 15) selectedGoalTitle.take(15) + "…" else selectedGoalTitle,
                                             fontSize = 12.sp,
                                             color = Color.Gray,
                                             maxLines = 1
@@ -2592,17 +2567,15 @@ fun EditTaskSheetContent(
                                             border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f))
                                         ) {
                                             Column(modifier = Modifier.width(300.dp).padding(3.dp)) {
-                                                GoalItem("Без цели", selectedGoal == null) {
-                                                    selectedGoal = null
+                                                GoalItem("Без цели", selectedGoalId == null) {
+                                                    selectedGoalId = null
                                                     showGoalSelector = false
                                                 }
-                                                GoalItem("Работа", selectedGoal == "Работа") {
-                                                    selectedGoal = "Работа"
-                                                    showGoalSelector = false
-                                                }
-                                                GoalItem("Личное", selectedGoal == "Личное") {
-                                                    selectedGoal = "Личное"
-                                                    showGoalSelector = false
+                                                goals.forEach { goal ->
+                                                    GoalItem(goal.title, selectedGoalId == goal.id) {
+                                                        selectedGoalId = goal.id
+                                                        showGoalSelector = false
+                                                    }
                                                 }
                                             }
                                         }

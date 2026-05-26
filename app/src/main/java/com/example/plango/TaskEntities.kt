@@ -11,12 +11,11 @@ data class TaskEntity(
     val title: String,
     val date_of_task: Long,
     val position: Int = 0,
-    val cover: Int? = null,
     val is_important: Boolean? = false,
     val is_urgency: Boolean? = false,
     val is_completed: Boolean? = false,
     val difficulty: Int,
-    val goal_id: Int = 0,
+    val goal_id: Int?,
 
     // обычные (одноразовые) даты
     val deadline_date: Long? = null,

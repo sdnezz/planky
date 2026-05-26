@@ -500,6 +500,9 @@ interface TaskDao {
         deleteSubTasksForTask(task.id)
         subtasks.forEach { insertSubTask(it) }
     }
+
+    @Query("UPDATE tasks SET goal_id = NULL WHERE goal_id = :goalId")
+    suspend fun clearGoalFromTasks(goalId: Int)
 }
 
 data class TaskWithSubtasks(
