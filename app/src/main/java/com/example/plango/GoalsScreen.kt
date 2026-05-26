@@ -98,12 +98,20 @@ fun GoalsScreen() {
     var editingGoal by remember { mutableStateOf<GoalEntity?>(null) }
     var deleteGoalCandidate by remember { mutableStateOf<GoalEntity?>(null) }
 
+    val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        orderedGoals = orderedGoals.toMutableList().apply {
+        val neworderedGoals = orderedGoals.toMutableList().apply {
             add(to.index, removeAt(from.index))
         }
+        orderedGoals = neworderedGoals
         haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+
+        coroutineScope.launch {
+            goalDao.updateGoalPositionsByOrder(
+                neworderedGoals.map { it.id }
+            )
+        }
     }
 
     // Сбрасываем позиции при изменении порядка
@@ -146,13 +154,7 @@ fun GoalsScreen() {
                             },
                             onEdit = { editingGoal = goal },
                             onDelete = { deleteGoalCandidate = goal },
-                            onDragStopped = {
-                                scope.launch {
-                                    goalDao.updateGoalPositionsByOrder(
-                                        orderedGoals.map { it.id }
-                                    )
-                                }
-                            }
+                            onDragStopped = {}
                         )
                     }
                 }
