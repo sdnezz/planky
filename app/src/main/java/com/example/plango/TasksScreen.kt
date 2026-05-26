@@ -1023,10 +1023,17 @@ fun TaskListPage(
     val hapticFeedback = LocalHapticFeedback.current
     val lazyListState = rememberLazyListState()
     val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        orderedTasks = orderedTasks.toMutableList().apply {
+        val newOrderedTasks = orderedTasks.toMutableList().apply {
             add(to.index, removeAt(from.index))
         }
+        orderedTasks = newOrderedTasks
         hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+
+        coroutineScope.launch {
+            taskDao.updateTaskPositionsByOrder(
+                newOrderedTasks.map { it.task.id }
+            )
+        }
     }
 
     LazyColumn(
@@ -1046,11 +1053,11 @@ fun TaskListPage(
                         reorderScope = this,
                         onClick = { onTaskClick(item) },
                         onDragStopped = {
-                            coroutineScope.launch {
-                                orderedTasks.forEachIndexed { index, t ->
-                                    taskDao.updateTask(t.task.copy(position = index + 1))
-                                }
-                            }
+//                            coroutineScope.launch {
+//                                taskDao.updateTaskPositionsByOrder(
+//                                    orderedTasks.map { it.task.id }
+//                                )
+//                            }
                         },
                         onToggleCompleted = { updatedTask, updatedSubtasks ->
                             coroutineScope.launch {

@@ -272,6 +272,9 @@ interface TaskDao {
         }
     }
 
+    @Query("SELECT position FROM tasks WHERE id = :taskId LIMIT 1")
+    suspend fun getTaskPosition(taskId: Int): Int?
+
     @Transaction
     suspend fun updatePositionsOnReorder(
         oldItem: TaskEntity,
@@ -371,10 +374,11 @@ interface TaskDao {
     ): Long {
         deleteOccurrenceCopy(baseTask.id, occurrenceDate)
         deleteOccurrenceExceptionForDay(baseTask.id, occurrenceDate)
-
+        val preservedPosition = getTaskPosition(baseTask.id) ?: baseTask.position ?: 0
         val newTaskId = insertTask(
             updatedTask.copy(
                 id = 0,
+                position = preservedPosition,
                 date_of_task = occurrenceDate,
                 source_task_id = baseTask.id,
                 repeat_mon = false,
@@ -419,9 +423,11 @@ interface TaskDao {
         if (existingCopy == null) {
             createOneDayCopy(baseTask, occurrenceDate, updatedTask, subtasks)
         } else {
+            val preservedPosition = existingCopy.position ?: getTaskPosition(existingCopy.id) ?: 1
             updateTaskWithSubtasks(
                 updatedTask.copy(
                     id = existingCopy.id,
+                    position = preservedPosition,
                     date_of_task = occurrenceDate,
                     source_task_id = baseTask.id,
                     repeat_mon = false,
@@ -461,10 +467,11 @@ interface TaskDao {
         effectiveDate: Long
     ): Long {
         endRecurringSeries(originalTask.id, effectiveDate - 86_400_000L)
-
+        val preservedPosition = getTaskPosition(originalTask.id) ?: originalTask.position ?: 0
         val newTaskId = insertTask(
             newTask.copy(
                 id = 0,
+                position = preservedPosition,
                 date_of_task = effectiveDate,
                 source_task_id = null,
                 repeat_until_date = null
@@ -488,7 +495,8 @@ interface TaskDao {
         task: TaskEntity,
         subtasks: List<SubTaskEntity>
     ) {
-        updateTask(task)
+        val currentPosition = getTaskPosition(task.id) ?: task.position
+        updateTask(task.copy(position = currentPosition))
         deleteSubTasksForTask(task.id)
         subtasks.forEach { insertSubTask(it) }
     }
