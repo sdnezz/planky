@@ -24,19 +24,42 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        val db = AppDatabase.getDatabase(this)
+        val settingsDao = db.settingsDao()
+
+        val initialSettings = runBlocking {
+            settingsDao.getSettings()
+        }
+        val settingsFlow = MutableStateFlow(initialSettings)
+
+        lifecycleScope.launch {
+            settingsDao.observeSettings().collect { updatedSettings ->
+                settingsFlow.value = updatedSettings
+            }
+        }
+
         setContent {
-            MaterialTheme {
+            val settings by settingsFlow.collectAsState()
+
+            val colorScheme = appTheme(settings)
+            MaterialTheme(colorScheme = colorScheme) {
                 MainScreen()
             }
         }
@@ -84,6 +107,27 @@ fun MainScreen() {
             }
         }
     }
+}
+
+@Composable
+fun appTheme(appSettings: AppSettingsEntity?): ColorScheme {
+    val isSystemDark = isSystemInDarkTheme()
+    val themeType = appSettings?.themeType?.let { AppThemeType.valueOf(it) } ?: AppThemeType.SYSTEM
+    val accentOption = appSettings?.accentColor?.let { AccentColorOption.valueOf(it) } ?: AccentColorOption.ORANGE
+
+    val isDark = when (themeType) {
+        AppThemeType.LIGHT -> false
+        AppThemeType.DARK -> true
+        AppThemeType.SYSTEM -> isSystemDark
+    }
+
+    val accentColor = accentOption.getColor(isDark)
+    val baseScheme = if (isDark) darkColorScheme() else lightColorScheme()
+    return baseScheme.copy(
+        primary = accentColor,
+        secondary = accentColor,
+        tertiary = accentColor
+    )
 }
 
 @Preview(showBackground = true)

@@ -3,6 +3,7 @@ package com.example.plango
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,9 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +48,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.selects.select
 import kotlin.math.roundToInt
 
 private enum class Chronotype(val storageValue: String, val title: String) {
@@ -68,14 +74,35 @@ fun SettingsScreen() {
     val db = remember { AppDatabase.getDatabase(context) }
     val settingsDao = db.settingsDao()
     val scope = rememberCoroutineScope()
-
-    val chronotype by settingsDao.observeChronotype().collectAsState(initial = null)
+    val initialSettings = remember { runBlocking { settingsDao.getSettings() } }
+    val settings by settingsDao.observeSettings().collectAsState(initial = initialSettings)
 
     var showChronotypeSelector by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     var chronotypeButtonBounds by remember { mutableStateOf<Rect?>(null) }
 
+    val chronotype = settings?.chronotype
     val displayText = chronotypeDisplayText(chronotype)
+
+    val currentThemeType = settings?.themeType?.let { AppThemeType.valueOf(it) } ?: AppThemeType.SYSTEM
+    val currentAccent = settings?.accentColor?.let { AccentColorOption.valueOf(it) } ?: AccentColorOption.ORANGE
+
+    fun saveSettings(
+        themeType: AppThemeType? = null,
+        accent: AccentColorOption? = null,
+        chronotypeValue: String? = null
+    ) {
+        scope.launch {
+            settingsDao.upsertSettings(
+                AppSettingsEntity(
+                    id = 1,
+                    chronotype = chronotypeValue ?: settings?.chronotype,
+                    themeType = (themeType ?: currentThemeType).name,
+                    accentColor = (accent ?: currentAccent).name
+                )
+            )
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -176,14 +203,7 @@ fun SettingsScreen() {
                                                 text = "Утренний",
                                                 selected = chronotype == Chronotype.MORNING.storageValue,
                                                 onClick = {
-                                                    scope.launch {
-                                                        settingsDao.upsertSettings(
-                                                            AppSettingsEntity(
-                                                                id = 1,
-                                                                chronotype = Chronotype.MORNING.storageValue
-                                                            )
-                                                        )
-                                                    }
+                                                    saveSettings(chronotypeValue = Chronotype.MORNING.storageValue)
                                                     showChronotypeSelector = false
                                                 }
                                             )
@@ -192,14 +212,7 @@ fun SettingsScreen() {
                                                 text = "Вечерний",
                                                 selected = chronotype == Chronotype.EVENING.storageValue,
                                                 onClick = {
-                                                    scope.launch {
-                                                        settingsDao.upsertSettings(
-                                                            AppSettingsEntity(
-                                                                id = 1,
-                                                                chronotype = Chronotype.EVENING.storageValue
-                                                            )
-                                                        )
-                                                    }
+                                                    saveSettings(chronotypeValue = Chronotype.EVENING.storageValue)
                                                     showChronotypeSelector = false
                                                 }
                                             )
@@ -208,14 +221,7 @@ fun SettingsScreen() {
                                                 text = "Умеренный",
                                                 selected = chronotype == Chronotype.INTERMEDIATE.storageValue,
                                                 onClick = {
-                                                    scope.launch {
-                                                        settingsDao.upsertSettings(
-                                                            AppSettingsEntity(
-                                                                id = 1,
-                                                                chronotype = Chronotype.INTERMEDIATE.storageValue
-                                                            )
-                                                        )
-                                                    }
+                                                    saveSettings(chronotypeValue = Chronotype.INTERMEDIATE.storageValue)
                                                     showChronotypeSelector = false
                                                 }
                                             )
@@ -248,6 +254,60 @@ fun SettingsScreen() {
                                     color = MaterialTheme.colorScheme.primary,
                                     fontWeight = FontWeight.Medium
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                tonalElevation = 2.dp
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Тема", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ThemeOption(Color.White, "Светлая", currentThemeType == AppThemeType.LIGHT) {
+                            saveSettings(AppThemeType.LIGHT)
+                        }
+                        ThemeOption(Color.Black, "Тёмная", currentThemeType == AppThemeType.DARK) {
+                            saveSettings(AppThemeType.DARK)
+                        }
+                        ThemeOption(Color.Gray, "Система", currentThemeType == AppThemeType.SYSTEM) {
+                            saveSettings(AppThemeType.SYSTEM)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ----- Блок Акцентный цвет -----
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                tonalElevation = 2.dp
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Акцентный цвет", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AccentColorOption.values().forEach { option ->
+                            val color = option.getColor(
+                                when (currentThemeType) {
+                                    AppThemeType.LIGHT -> false
+                                    AppThemeType.DARK -> true
+                                    else -> isSystemInDarkTheme()
+                                }
+                            )
+                            AccentColorDot(color, option == currentAccent) {
+                                saveSettings(accent = option)
                             }
                         }
                     }
@@ -287,4 +347,30 @@ private fun ChronotypeItem(
             )
         }
     }
+}
+
+@Composable
+private fun ThemeOption(color: Color, label: String, selected: Boolean, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            modifier = Modifier.size(40.dp),
+            color = color,
+            border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+        ) {}
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(label, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun AccentColorDot(color: Color, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        modifier = Modifier.size(30.dp),
+        color = color,
+        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+    ) {}
 }

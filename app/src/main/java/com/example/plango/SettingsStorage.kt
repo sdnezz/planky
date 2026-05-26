@@ -11,7 +11,9 @@ import kotlinx.coroutines.flow.Flow
 @Entity(tableName = "app_settings")
 data class AppSettingsEntity(
     @PrimaryKey val id: Int = 1,
-    val chronotype: String? = null
+    val chronotype: String? = null,
+    val themeType: String? = null,   // "LIGHT", "DARK", "SYSTEM"
+    val accentColor: String? = null  // название AccentColorOption
 )
 
 @Dao
@@ -27,4 +29,7 @@ interface SettingsDao {
 
     @Query("UPDATE app_settings SET chronotype = :chronotype WHERE id = 1")
     suspend fun updateChronotype(chronotype: String)
+
+    @Query("SELECT * FROM app_settings WHERE id = 1 LIMIT 1")
+    fun observeSettings(): Flow<AppSettingsEntity?>
 }
