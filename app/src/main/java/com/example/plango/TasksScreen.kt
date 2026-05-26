@@ -384,6 +384,7 @@ fun TasksScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
+            .graphicsLayer(clip = false)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -502,16 +503,17 @@ fun TasksScreen(
             }
         }
 
-        Box(modifier = Modifier.weight(1f)) {
+        Box(modifier = Modifier.weight(1f).graphicsLayer(clip = false)) {
             HorizontalPager(
                 state = taskPagerState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().graphicsLayer(clip = false),
                 beyondViewportPageCount = 1 // предзагружаем соседние дни
             ) { page ->
                 val pageDate = today.plusDays((page - initialPage).toLong())
                 TaskListPage(
                     date = pageDate,
                     taskDao = taskDao,
+                    goalDao = goalDao,
                     coroutineScope = coroutineScope,
                     onTaskClick = { taskWithSubtasks ->
                         editingTask = taskWithSubtasks
@@ -990,6 +992,7 @@ fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
 fun TaskListPage(
     date: LocalDate,
     taskDao: TaskDao,
+    goalDao: GoalDao,
     coroutineScope: CoroutineScope,
     onTaskClick: (TaskWithSubtasks) -> Unit
 ) {
@@ -1044,88 +1047,87 @@ fun TaskListPage(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 8.dp),
+            .padding(top = 8.dp)
+            .graphicsLayer(clip = false),
         state = lazyListState,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         items(orderedTasks, key = { it.task.id }) { item ->
             ReorderableItem(reorderableLazyListState, key = item.task.id) { isDragging ->
-                val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp)
-                Surface(shadowElevation = elevation) {
-                    TaskItemView(
-                        task = item.task,
-                        subtasks = item.subtasks,
-                        reorderScope = this,
-                        onClick = { onTaskClick(item) },
-                        onDragStopped = {
-//                            coroutineScope.launch {
-//                                taskDao.updateTaskPositionsByOrder(
-//                                    orderedTasks.map { it.task.id }
-//                                )
-//                            }
-                        },
-                        onToggleCompleted = { updatedTask, updatedSubtasks ->
-                            coroutineScope.launch {
-                                if (item.task.isRecurringSeries()) {
-                                    taskDao.saveRecurringOccurrenceForDate(
-                                        baseTask = item.task,
-                                        occurrenceDate = startOfDay,
-                                        updatedTask = updatedTask,
-                                        subtasks = updatedSubtasks
-                                    )
-                                } else {
-                                    taskDao.updateTask(updatedTask)
-                                    updatedSubtasks.forEach { taskDao.updateSubTask(it) }
-                                }
+                TaskItemView(
+                    task = item.task,
+                    subtasks = item.subtasks,
+                    isDragging = isDragging,
+                    reorderScope = this,
+                    onClick = { onTaskClick(item) },
+                    onDragStopped = {},
+                    onToggleCompleted = { updatedTask, updatedSubtasks ->
+                        coroutineScope.launch {
+                            if (item.task.isRecurringSeries()) {
+                                taskDao.saveRecurringOccurrenceForDate(
+                                    baseTask = item.task,
+                                    occurrenceDate = startOfDay,
+                                    updatedTask = updatedTask,
+                                    subtasks = updatedSubtasks
+                                )
+                            } else {
+                                taskDao.updateTask(updatedTask)
+                                updatedSubtasks.forEach { taskDao.updateSubTask(it) }
                             }
-                        },
-                        onSubtaskToggle = { updatedSubtask ->
-                            coroutineScope.launch {
-                                if (item.task.isRecurringSeries()) {
-                                    val updatedTask = item.task.copy(is_completed = item.task.is_completed)
-                                    val currentSubtasks = item.subtasks.map { st ->
-                                        if (st.id == updatedSubtask.id) updatedSubtask else st
-                                    }
-                                    taskDao.saveRecurringOccurrenceForDate(
-                                        baseTask = item.task,
-                                        occurrenceDate = startOfDay,
-                                        updatedTask = updatedTask,
-                                        subtasks = currentSubtasks
-                                    )
-                                } else {
-                                    taskDao.updateSubTask(updatedSubtask)
-                                }
+                            if (updatedTask.goal_id != 0) {
+                                goalDao.updateCompletedCountForGoal(updatedTask.goal_id)
                             }
-                        },
-                        onDeleteTask = { taskToDelete, deleteScope ->
-                            coroutineScope.launch {
-                                val baseTaskId = taskToDelete.source_task_id ?: taskToDelete.id
-                                val occurrenceDate = taskToDelete.date_of_task
+                        }
+                    },
+                    onSubtaskToggle = { updatedSubtask ->
+                        coroutineScope.launch {
+                            if (item.task.isRecurringSeries()) {
+                                val updatedTask = item.task.copy(is_completed = item.task.is_completed)
+                                val currentSubtasks = item.subtasks.map { st ->
+                                    if (st.id == updatedSubtask.id) updatedSubtask else st
+                                }
+                                taskDao.saveRecurringOccurrenceForDate(
+                                    baseTask = item.task,
+                                    occurrenceDate = startOfDay,
+                                    updatedTask = updatedTask,
+                                    subtasks = currentSubtasks
+                                )
+                            } else {
+                                taskDao.updateSubTask(updatedSubtask)
+                            }
+                        }
+                    },
+                    onDeleteTask = { taskToDelete, deleteScope ->
+                        coroutineScope.launch {
+                            val baseTaskId = taskToDelete.source_task_id ?: taskToDelete.id
+                            val occurrenceDate = taskToDelete.date_of_task
 
-                                when (deleteScope) {
-                                    RecurrenceDeleteScope.ONLY_THIS_DAY -> {
-                                        if (taskToDelete.repeat_mon || taskToDelete.repeat_tue || taskToDelete.repeat_wed ||
-                                            taskToDelete.repeat_thu || taskToDelete.repeat_fri || taskToDelete.repeat_sat ||
-                                            taskToDelete.repeat_sun
-                                        ) {
-                                            taskDao.deleteOccurrenceForDate(baseTaskId, occurrenceDate)
-                                        } else {
-                                            taskDao.deleteTask(taskToDelete)
-                                        }
-                                    }
-
-                                    RecurrenceDeleteScope.THIS_AND_FUTURE -> {
-                                        taskDao.deleteRecurringSeriesFromDate(baseTaskId, occurrenceDate)
-                                    }
-
-                                    null -> {
+                            when (deleteScope) {
+                                RecurrenceDeleteScope.ONLY_THIS_DAY -> {
+                                    if (taskToDelete.repeat_mon || taskToDelete.repeat_tue || taskToDelete.repeat_wed ||
+                                        taskToDelete.repeat_thu || taskToDelete.repeat_fri || taskToDelete.repeat_sat ||
+                                        taskToDelete.repeat_sun
+                                    ) {
+                                        taskDao.deleteOccurrenceForDate(baseTaskId, occurrenceDate)
+                                    } else {
                                         taskDao.deleteTask(taskToDelete)
                                     }
                                 }
+
+                                RecurrenceDeleteScope.THIS_AND_FUTURE -> {
+                                    taskDao.deleteRecurringSeriesFromDate(baseTaskId, occurrenceDate)
+                                }
+
+                                null -> {
+                                    taskDao.deleteTask(taskToDelete)
+                                }
+                            }
+                            if (taskToDelete.goal_id != 0) {
+                                goalDao.updateCompletedCountForGoal(taskToDelete.goal_id)
                             }
                         }
-                    )
-                }
+                    }
+                )
             }
         }
     }
@@ -1135,6 +1137,7 @@ fun TaskListPage(
 fun TaskItemView(
     task: TaskEntity,
     subtasks: List<SubTaskEntity>,
+    isDragging: Boolean,
     reorderScope: ReorderableCollectionItemScope,
     onClick: () -> Unit,
     onToggleCompleted: (TaskEntity, List<SubTaskEntity>) -> Unit,
@@ -1331,9 +1334,24 @@ fun TaskItemView(
             currentTimeMs = System.currentTimeMillis()
         }
     }
+
+    val scale by animateFloatAsState(
+        targetValue = if (isDragging) 1.03f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        )
+    )
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .zIndex(if (isDragging) 1f else 0f)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                clip = false              // отключаем обрезку при перетаскивании
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null

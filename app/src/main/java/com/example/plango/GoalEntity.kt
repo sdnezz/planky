@@ -11,6 +11,7 @@ data class GoalEntity(
     val id: Int = 0,
     val title: String,
     val tasks_to_achieve: Int? = null,
+    val tasks_completed: Int = 0,
     val is_completed: Boolean = false,
     val position: Int = 0
 )

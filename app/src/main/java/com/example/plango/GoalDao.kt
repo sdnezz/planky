@@ -46,4 +46,17 @@ interface GoalDao {
         clearGoalFromTasks(goal.id)
         deleteGoal(goal)
     }
+
+    @Query("""
+        UPDATE goals SET 
+            tasks_completed = (SELECT COUNT(*) FROM tasks WHERE goal_id = :goalId AND is_completed = 1),
+            is_completed = CASE 
+                WHEN tasks_to_achieve IS NOT NULL AND 
+                     (SELECT COUNT(*) FROM tasks WHERE goal_id = :goalId AND is_completed = 1) >= tasks_to_achieve 
+                THEN 1 
+                ELSE is_completed 
+            END
+        WHERE id = :goalId
+    """)
+    suspend fun updateCompletedCountForGoal(goalId: Int?)
 }

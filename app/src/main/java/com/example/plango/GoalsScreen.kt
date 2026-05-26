@@ -5,16 +5,20 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -28,7 +32,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -58,7 +61,18 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
@@ -92,6 +106,11 @@ fun GoalsScreen() {
         haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
 
+    // Сбрасываем позиции при изменении порядка
+    LaunchedEffect(orderedGoals) {
+        // Опционально: сохранять позиции в БД при каждом изменении
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -116,31 +135,25 @@ fun GoalsScreen() {
             ) {
                 items(orderedGoals, key = { it.id }) { goal ->
                     ReorderableItem(reorderableState, key = goal.id) { isDragging ->
-                        val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp)
-
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
-                            tonalElevation = 2.dp,
-                            shadowElevation = elevation,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { editingGoal = goal }
-                        ) {
-                            GoalItemView(
-                                goal = goal,
-                                reorderScope = this,
-                                onEdit = { editingGoal = goal },
-                                onDelete = { deleteGoalCandidate = goal },
-                                onDragStopped = {
-                                    scope.launch {
-                                        goalDao.updateGoalPositionsByOrder(
-                                            orderedGoals.map { it.id }
-                                        )
-                                    }
+                        GoalItemView(
+                            goal = goal,
+                            isDragging = isDragging,
+                            reorderScope = this,
+                            onToggleCompleted = { updatedGoal ->
+                                scope.launch {
+                                    goalDao.updateGoal(updatedGoal)
                                 }
-                            )
-                        }
+                            },
+                            onEdit = { editingGoal = goal },
+                            onDelete = { deleteGoalCandidate = goal },
+                            onDragStopped = {
+                                scope.launch {
+                                    goalDao.updateGoalPositionsByOrder(
+                                        orderedGoals.map { it.id }
+                                    )
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -179,16 +192,18 @@ fun GoalsScreen() {
         }
     }
 
+    // Добавление цели
     if (showAddGoalSheet) {
         GoalDialog(
             initialGoal = null,
             onDismiss = { showAddGoalSheet = false },
-            onSave = { title, tasksToAchieve, isCompleted ->
+            onSave = { title, tasksToAchieve ->
                 scope.launch {
                     val newGoal = GoalEntity(
                         title = title.trim(),
                         tasks_to_achieve = tasksToAchieve,
-                        is_completed = isCompleted,
+                        tasks_completed = 0,
+                        is_completed = false,
                         position = goalDao.getGoalCount() + 1
                     )
                     goalDao.insertGoal(newGoal)
@@ -198,18 +213,18 @@ fun GoalsScreen() {
         )
     }
 
+    // Редактирование цели
     if (editingGoal != null) {
         GoalDialog(
             initialGoal = editingGoal,
             onDismiss = { editingGoal = null },
-            onSave = { title, tasksToAchieve, isCompleted ->
+            onSave = { title, tasksToAchieve ->
                 val current = editingGoal ?: return@GoalDialog
                 scope.launch {
                     goalDao.updateGoal(
                         current.copy(
                             title = title.trim(),
-                            tasks_to_achieve = tasksToAchieve,
-                            is_completed = isCompleted
+                            tasks_to_achieve = tasksToAchieve
                         )
                     )
                     editingGoal = null
@@ -218,6 +233,7 @@ fun GoalsScreen() {
         )
     }
 
+    // Диалог удаления цели
     if (deleteGoalCandidate != null) {
         val goal = deleteGoalCandidate!!
         Dialog(
@@ -276,82 +292,159 @@ fun GoalsScreen() {
 @Composable
 private fun GoalItemView(
     goal: GoalEntity,
+    isDragging: Boolean,
     reorderScope: ReorderableCollectionItemScope,
+    onToggleCompleted: (GoalEntity) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onDragStopped: () -> Unit
 ) {
-    Row(
+    val activeGreen = Color(0xFF4CAF50)
+    val haptic = LocalHapticFeedback.current
+
+    val scale by animateFloatAsState(
+        targetValue = if (isDragging) 1.03f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        )
+    )
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+        tonalElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .zIndex(if (isDragging) 1f else 0f)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                clip = false              // отключаем обрезку при перетаскивании
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onEdit() }
     ) {
-        Box(
+        Column(
             modifier = Modifier
-                .size(24.dp)
-                .background(
-                    color = if (goal.is_completed) Color(0xFF4CAF50).copy(alpha = 0.1f) else Color.Transparent,
-                    shape = CircleShape
-                )
-                .border(
-                    2.dp,
-                    if (goal.is_completed) Color(0xFF4CAF50) else Color.LightGray,
-                    CircleShape
-                )
-                .clickable {
-                    onEdit()
-                },
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .background(Color.Transparent)
+                .padding(horizontal = 8.dp, vertical = 8.dp)
         ) {
-            if (goal.is_completed) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = Color(0xFF4CAF50)
-                )
-            }
-        }
+            // Верхняя строка: чекбокс, название, удаление, перетаскивание
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(
+                            color = if (goal.is_completed) activeGreen.copy(alpha = 0.1f) else Color.Transparent,
+                            shape = CircleShape
+                        )
+                        .border(
+                            2.dp,
+                            if (goal.is_completed) activeGreen else Color.LightGray,
+                            CircleShape
+                        )
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onToggleCompleted(goal.copy(is_completed = !goal.is_completed))
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (goal.is_completed) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = activeGreen
+                        )
+                    }
+                }
 
-        Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = goal.title,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Medium,
-                color = if (goal.is_completed) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onBackground
-            )
-            if (goal.tasks_to_achieve != null) {
-                Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = "Нужно задач: ${goal.tasks_to_achieve}",
-                    fontSize = 12.sp,
-                    color = Color.Gray
+                    text = goal.title,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                    color = if (goal.is_completed) activeGreen else MaterialTheme.colorScheme.onBackground,
+                    textDecoration = if (goal.is_completed) TextDecoration.LineThrough else null
+                )
+
+                IconButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        onDelete()
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Удалить цель",
+                        tint = Color(0xFFD32F2F)
+                    )
+                }
+
+                Icon(
+                    imageVector = Icons.Rounded.Menu,
+                    contentDescription = "Переместить",
+                    tint = Color.LightGray,
+                    modifier = with(reorderScope) {
+                        Modifier.draggableHandle(
+                            onDragStopped = { onDragStopped() }
+                        )
+                    }
                 )
             }
-        }
 
-        IconButton(
-            onClick = onDelete,
-            modifier = Modifier.size(36.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Удалить цель",
-                tint = Color(0xFFD32F2F)
-            )
-        }
-
-        Icon(
-            imageVector = Icons.Rounded.Menu,
-            contentDescription = "Переместить",
-            tint = Color.LightGray,
-            modifier = with(reorderScope) {
-                Modifier.draggableHandle(onDragStopped = { onDragStopped() })
+            if (goal.tasks_to_achieve != null && goal.tasks_to_achieve > 0) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 36.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(6.dp)
+                            .background(
+                                color = activeGreen.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(3.dp)
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(
+                                    (goal.tasks_completed.toFloat() / goal.tasks_to_achieve).coerceIn(0f, 1f)
+                                )
+                                .background(
+                                    color = activeGreen,
+                                    shape = RoundedCornerShape(3.dp)
+                                )
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${goal.tasks_completed}/${goal.tasks_to_achieve}",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
-        )
+        }
     }
 }
 
@@ -360,7 +453,7 @@ private fun GoalItemView(
 private fun GoalDialog(
     initialGoal: GoalEntity?,
     onDismiss: () -> Unit,
-    onSave: (title: String, tasksToAchieve: Int?, isCompleted: Boolean) -> Unit
+    onSave: (title: String, tasksToAchieve: Int?) -> Unit
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -386,7 +479,7 @@ private fun GoalDialog(
 private fun GoalSheetContent(
     initialGoal: GoalEntity?,
     onDismiss: () -> Unit,
-    onSave: (title: String, tasksToAchieve: Int?, isCompleted: Boolean) -> Unit
+    onSave: (title: String, tasksToAchieve: Int?) -> Unit
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
@@ -395,10 +488,13 @@ private fun GoalSheetContent(
     val haptic = LocalHapticFeedback.current
 
     val goal = initialGoal
-
     var title by remember(goal?.id) { mutableStateOf(goal?.title ?: "") }
     var tasksToAchieveText by remember(goal?.id) { mutableStateOf(goal?.tasks_to_achieve?.toString() ?: "") }
-    var isCompleted by remember(goal?.id) { mutableStateOf(goal?.is_completed ?: false) }
+    val isEditMode = goal != null
+
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    var hasKeyboardShown by remember { mutableStateOf(false) }
+    if (imeBottom > 0) hasKeyboardShown = true
 
     var isDismissing by remember { mutableStateOf(false) }
     var AnimatabletranslationY = remember { Animatable(0f) }
@@ -407,32 +503,61 @@ private fun GoalSheetContent(
         if (isDismissing) return
         isDismissing = true
         keyboardController?.hide()
-
         coroutineScope.launch {
             AnimatabletranslationY.animateTo(
                 targetValue = 1200f,
                 animationSpec = tween(durationMillis = 260, easing = FastOutLinearInEasing)
             )
             if (save && title.isNotBlank()) {
-                onSave(
-                    title.trim(),
-                    tasksToAchieveText.trim().takeIf { it.isNotBlank() }?.toIntOrNull(),
-                    isCompleted
-                )
+                val tasksToAchieve = tasksToAchieveText.trim().takeIf { it.isNotBlank() }?.toIntOrNull()
+                onSave(title.trim(), tasksToAchieve)
             }
             onDismiss()
         }
     }
 
+    val scrimAlpha by animateFloatAsState(
+        targetValue = when {
+            isDismissing -> 0f
+            hasKeyboardShown -> 0.45f
+            else -> 0f
+        },
+        animationSpec = tween(220)
+    )
+
+    val sheetAlpha by animateFloatAsState(
+        targetValue = if (hasKeyboardShown && !isDismissing) 1f else 0f,
+        animationSpec = tween(180)
+    )
+
     LaunchedEffect(Unit) {
+        delay(16)
         focusRequester.requestFocus()
         keyboardController?.show()
     }
 
+    // Scrim
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .alpha(scrimAlpha)
+            .background(Color.Black)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { triggerDismiss(false) }
+    )
+
+    // Основное окно
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer { translationY = AnimatabletranslationY.value },
+            .alpha(sheetAlpha)
+            .graphicsLayer { translationY = AnimatabletranslationY.value }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { /* блокируем клик */ },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 8.dp
@@ -442,12 +567,15 @@ private fun GoalSheetContent(
                 .fillMaxWidth()
                 .padding(bottom = 24.dp)
         ) {
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Drag handle
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(10.dp)
                     .draggable(
-                        orientation = androidx.compose.foundation.gestures.Orientation.Vertical,
+                        orientation = Orientation.Vertical,
                         state = rememberDraggableState { delta ->
                             if (!isDismissing) {
                                 coroutineScope.launch {
@@ -456,8 +584,9 @@ private fun GoalSheetContent(
                             }
                         },
                         onDragStopped = { velocity ->
+                            if (isDismissing) return@draggable
                             if (AnimatabletranslationY.value > 600f || velocity > 5000f) {
-                                triggerDismiss(save = false)
+                                triggerDismiss(false)
                             } else {
                                 coroutineScope.launch {
                                     AnimatabletranslationY.animateTo(
@@ -497,44 +626,91 @@ private fun GoalSheetContent(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                OutlinedTextField(
-                    value = tasksToAchieveText,
-                    onValueChange = { new ->
-                        tasksToAchieveText = new.filter { it.isDigit() }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    placeholder = { Text("Сколько задач нужно выполнить (необязательно)", fontSize = 14.sp, color = Color.Gray) }
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = isCompleted,
-                        onCheckedChange = { isCompleted = it }
-                    )
-                    Text("Цель выполнена")
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    TextButton(onClick = { triggerDismiss(save = false) }) {
-                        Text("Отмена")
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { triggerDismiss(save = title.isNotBlank()) },
-                        enabled = title.isNotBlank(),
-                        shape = RoundedCornerShape(12.dp)
+                    Text(
+                        text = "Задач для достижения:",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val lineColor = if (tasksToAchieveText.isNotEmpty())
+                        MaterialTheme.colorScheme.primary
+                    else
+                        Color.LightGray.copy(alpha = 0.5f)
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    // Поле ввода количества с подчеркиванием
+                    Box(
+                        modifier = Modifier
+                            .width(100.dp)
+                            .height(32.dp)
+                            .drawBehind {
+                                val strokeWidth = 1.dp.toPx()
+                                val y = size.height - strokeWidth / 2
+                                drawLine(
+                                    color = lineColor,
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = strokeWidth
+                                )
+                            },
+                        contentAlignment = Alignment.BottomCenter
                     ) {
-                        Text("Сохранить")
+                        BasicTextField(
+                            value = tasksToAchieveText,
+                            onValueChange = { new -> tasksToAchieveText = new.filter { it.isDigit() } },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            textStyle = TextStyle(
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            decorationBox = { innerTextField ->
+                                Box(contentAlignment = Alignment.Center,modifier = Modifier.padding(bottom = 2.dp)) {
+                                    if (tasksToAchieveText.isEmpty()) {
+                                        Text(
+                                            text = "количество",
+                                            fontSize = 14.sp,
+                                            color = Color.Gray,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    val canSave = title.isNotBlank()
+                    Surface(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            if (canSave) triggerDismiss(save = true)
+                        },
+                        modifier = Modifier
+                            .size(43.dp)
+                            .semantics { testTag = "save_goal_button" },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (canSave) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        enabled = canSave
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isEditMode) Icons.Default.Check else Icons.Default.ArrowForward,
+                                contentDescription = "Сохранить",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
                 }
             }
