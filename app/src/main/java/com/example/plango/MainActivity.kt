@@ -1,5 +1,6 @@
 package com.example.plango
 
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,9 +28,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -59,6 +62,18 @@ class MainActivity : ComponentActivity() {
             val settings by settingsFlow.collectAsState()
 
             val colorScheme = appTheme(settings)
+            val isDark = isDarkTheme(settings)
+
+            val view = LocalView.current
+            if (!view.isInEditMode) {
+                val window = (view.context as Activity).window
+                SideEffect {
+                    WindowInsetsControllerCompat(window, view).apply {
+                        setAppearanceLightStatusBars(!isDark)
+                    }
+                }
+            }
+
             MaterialTheme(colorScheme = colorScheme) {
                 MainScreen()
             }
@@ -110,18 +125,22 @@ fun MainScreen() {
 }
 
 @Composable
-fun appTheme(appSettings: AppSettingsEntity?): ColorScheme {
+fun isDarkTheme(appSettings: AppSettingsEntity?): Boolean {
     val isSystemDark = isSystemInDarkTheme()
     val themeType = appSettings?.themeType?.let { AppThemeType.valueOf(it) } ?: AppThemeType.SYSTEM
-    val accentOption = appSettings?.accentColor?.let { AccentColorOption.valueOf(it) } ?: AccentColorOption.ORANGE
-
-    val isDark = when (themeType) {
+    return when (themeType) {
         AppThemeType.LIGHT -> false
         AppThemeType.DARK -> true
         AppThemeType.SYSTEM -> isSystemDark
     }
+}
 
+@Composable
+fun appTheme(appSettings: AppSettingsEntity?): ColorScheme {
+    val isDark = isDarkTheme(appSettings)
+    val accentOption = appSettings?.accentColor?.let { AccentColorOption.valueOf(it) } ?: AccentColorOption.ORANGE
     val accentColor = accentOption.getColor(isDark)
+
     val baseScheme = if (isDark) darkColorScheme() else lightColorScheme()
     return baseScheme.copy(
         primary = accentColor,

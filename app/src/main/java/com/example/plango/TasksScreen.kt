@@ -159,6 +159,7 @@ import java.time.ZoneId
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
@@ -387,13 +388,13 @@ fun TasksScreen(
             .graphicsLayer(clip = false)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(0.dp, 8.dp, 0.dp, 0.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = displayedMonthText,
-                fontSize = 24.sp,
+                fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -405,7 +406,7 @@ fun TasksScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         CalendarWeekPager(
             pagerState = pagerState,
@@ -414,7 +415,7 @@ fun TasksScreen(
             onDateSelected = { selectedDate = it }
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         Row(
             modifier = Modifier
@@ -1151,7 +1152,7 @@ fun TaskItemView(
             task.repeat_thu || task.repeat_fri || task.repeat_sat || task.repeat_sun
 
     var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
-    val activeGreen = Color(0xFF4CAF50)
+    val activeGreen = MaterialTheme.colorScheme.primary
     val haptic = LocalHapticFeedback.current
 
     if (showDeleteDialog) {
@@ -1430,9 +1431,9 @@ fun TaskItemView(
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Delete,
+                        imageVector = Icons.Outlined.Delete,
                         contentDescription = "Удалить задачу",
-                        tint = Color(0xFFD32F2F)
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
@@ -3004,62 +3005,62 @@ fun ReminderPickerDialog(
                         )
                     }
                 }
-                HorizontalDivider(
-                    modifier = Modifier.padding(top = 0.dp, bottom = 8.dp),
-                    thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
-                )
-                // === "Напомнить за:" ===
-                Text(
-                    "Напомнить за:",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // === Два колеса и надпись "ДО" ===
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(0.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val numbers = remember { (0..60).toList() }
-                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        WheelPicker(
-                            items = numbers,
-                            initialItem = remindBeforeValue,
-                            itemHeight = 36.dp,
-                            visibleItems = 5,
-                            centerFontSize = 20.sp,
-                            secondaryFontSize = 16.sp,
-                            onItemSelected = { remindBeforeValue = it }
-                        )
-                    }
-
-                    val units = remember { ReminderUnit.values().toList() }
-                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        WheelPicker(
-                            items = units,
-                            initialItem = remindBeforeUnit,
-                            itemHeight = 36.dp,
-                            visibleItems = 5,
-                            centerFontSize = 20.sp,
-                            secondaryFontSize = 16.sp,
-                            formatter = { it.displayName },
-                            onItemSelected = { remindBeforeUnit = it }
-                        )
-                    }
-
-                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        Text(
-                            "ДО",
-                            fontSize = 28.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
+//                HorizontalDivider(
+//                    modifier = Modifier.padding(top = 0.dp, bottom = 8.dp),
+//                    thickness = 1.dp,
+//                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
+//                )
+//                // === "Напомнить за:" ===
+//                Text(
+//                    "Напомнить за:",
+//                    fontSize = 16.sp,
+//                    fontWeight = FontWeight.Bold,
+//                    color = MaterialTheme.colorScheme.primary
+//                )
+//                Spacer(modifier = Modifier.height(4.dp))
+//
+//                // === Два колеса и надпись "ДО" ===
+//                Row(
+//                    modifier = Modifier.fillMaxWidth(),
+//                    horizontalArrangement = Arrangement.spacedBy(0.dp),
+//                    verticalAlignment = Alignment.CenterVertically
+//                ) {
+//                    val numbers = remember { (0..60).toList() }
+//                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+//                        WheelPicker(
+//                            items = numbers,
+//                            initialItem = remindBeforeValue,
+//                            itemHeight = 36.dp,
+//                            visibleItems = 5,
+//                            centerFontSize = 20.sp,
+//                            secondaryFontSize = 16.sp,
+//                            onItemSelected = { remindBeforeValue = it }
+//                        )
+//                    }
+//
+//                    val units = remember { ReminderUnit.values().toList() }
+//                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+//                        WheelPicker(
+//                            items = units,
+//                            initialItem = remindBeforeUnit,
+//                            itemHeight = 36.dp,
+//                            visibleItems = 5,
+//                            centerFontSize = 20.sp,
+//                            secondaryFontSize = 16.sp,
+//                            formatter = { it.displayName },
+//                            onItemSelected = { remindBeforeUnit = it }
+//                        )
+//                    }
+//
+//                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+//                        Text(
+//                            "ДО",
+//                            fontSize = 28.sp,
+//                            color = MaterialTheme.colorScheme.primary,
+//                            fontWeight = FontWeight.ExtraBold
+//                        )
+//                    }
+//                }
 
                 //                Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider(

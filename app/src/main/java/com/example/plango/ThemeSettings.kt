@@ -7,24 +7,24 @@ import androidx.compose.ui.graphics.Color
 
 // Акцентные цвета для светлой темы
 object LightAccentColors {
-    val Red = Color(0xFFD32F2F)
-    val Orange = Color(0xFFE65100)
-    val Yellow = Color(0xFFFBC02D)
-    val Green = Color(0xFF388E3C)
-    val Cyan = Color(0xFF0097A7)
-    val Blue = Color(0xFF1976D2)
-    val Purple = Color(0xFF7B1FA2)
+    val Red = Color(0xFFFF0000)
+    val Orange = Color(0xFFFFAA00)
+    val Yellow = Color(0xFFFFC800)
+    val Green = Color(0xFF4CAF50)
+    val Cyan = Color(0xFF00E4FF)
+    val Blue = Color(0xFF27A1FF)
+    val Purple = Color(0xFF8000FF)
 }
 
 // Акцентные цвета для тёмной темы
 object DarkAccentColors {
-    val Red = Color(0xFFEF5350)
-    val Orange = Color(0xFFFF9800)
-    val Yellow = Color(0xFFFFEB3B)
+    val Red = Color(0xFFFF0300)
+    val Orange = Color(0xFFFFAA00)
+    val Yellow = Color(0xFFFFDD00)
     val Green = Color(0xFF4CAF50)
-    val Cyan = Color(0xFF26C6DA)
-    val Blue = Color(0xFF42A5F5)
-    val Purple = Color(0xFFAB47BC)
+    val Cyan = Color(0xFF00E3FF)
+    val Blue = Color(0xFF42B0FF)
+    val Purple = Color(0xFFA550FF)
 }
 
 enum class AccentColorOption(val lightColor: Color, val darkColor: Color) {
