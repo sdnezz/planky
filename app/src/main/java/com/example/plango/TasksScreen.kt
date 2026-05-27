@@ -162,6 +162,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import com.example.plango.TaskPrioritizer.toPriorityInput
 import kotlinx.collections.immutable.toImmutableList
@@ -484,7 +485,7 @@ fun TasksScreen(
                         modifier = Modifier
                             .size(20.dp)
                             .clip(RoundedCornerShape(36.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f))
                             .border(
                                 1.dp,
                                 MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
@@ -494,7 +495,7 @@ fun TasksScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Search,
+                            painter = painterResource(id = R.drawable.question_lg),
                             contentDescription = "О приоритизации",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)

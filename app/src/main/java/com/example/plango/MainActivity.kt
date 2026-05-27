@@ -26,9 +26,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.core.view.WindowCompat
@@ -86,7 +88,7 @@ fun MainScreen() {
     var selectedItem by remember { mutableIntStateOf(1) }
     val haptic = LocalHapticFeedback.current
     val items = listOf("Цели", "Задачи", "Настройки")
-    val icons = listOf(Icons.Filled.Star, Icons.Filled.List, Icons.Filled.Settings)
+    val icons = listOf(ImageVector.vectorResource(R.drawable.stars), Icons.Filled.List, Icons.Filled.Settings)
     var hasInitialized by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedItem) {
