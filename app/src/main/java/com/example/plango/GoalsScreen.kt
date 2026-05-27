@@ -300,7 +300,7 @@ private fun GoalItemView(
     onDelete: () -> Unit,
     onDragStopped: () -> Unit
 ) {
-    val activeGreen = Color(0xFF4CAF50)
+    val activeGreen = MaterialTheme.colorScheme.primary
     val haptic = LocalHapticFeedback.current
 
     val scale by animateFloatAsState(

@@ -249,6 +249,7 @@ private fun List<SubTaskEntity>.sameContentAs(other: List<SubTaskEntity>): Boole
 
 @Composable
 fun TasksScreen(
+    bottomPadding: Dp = 0.dp,
     onOpenSettings: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
@@ -531,7 +532,7 @@ fun TasksScreen(
                 shape = RoundedCornerShape(36.dp),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 16.dp)
+                    .padding(bottom = 64.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
             }
@@ -2475,7 +2476,7 @@ fun EditTaskSheetContent(
                             label = { Text("Важно", fontSize = 12.sp) },
                             modifier = Modifier.fillMaxWidth().height(43.dp),
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFFFFA726)
+                                selectedContainerColor = Color.Red
                             )
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -2485,7 +2486,7 @@ fun EditTaskSheetContent(
                             label = { Text("Срочно", fontSize = 12.sp) },
                             modifier = Modifier.fillMaxWidth().height(43.dp),
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFFEF5350)
+                                selectedContainerColor = Color(0xFFFFA726)
                             )
                         )
                     }
@@ -2751,7 +2752,7 @@ fun SubTaskItem(
     onToggle: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val activeGreen = Color(0xFF4CAF50)
+    val activeGreen = MaterialTheme.colorScheme.primary
     val textColor = if (subTask.isDone) activeGreen.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurface
     val textDecoration = if (subTask.isDone) TextDecoration.LineThrough else TextDecoration.None
 
