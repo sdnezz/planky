@@ -162,7 +162,9 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.style.TextAlign
 import com.example.plango.TaskPrioritizer.toPriorityInput
 import kotlinx.collections.immutable.toImmutableList
@@ -404,7 +406,7 @@ fun TasksScreen(
                 showDatePicker = true
                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
             }) {
-                Icon(imageVector = Icons.Default.DateRange, contentDescription = "Календарь")
+                Icon(imageVector = ImageVector.vectorResource(R.drawable.calendar_week), contentDescription = "Календарь")
             }
         }
 
@@ -496,7 +498,7 @@ fun TasksScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.question_lg),
+                            painter = painterResource(id = R.drawable.info_lg),
                             contentDescription = "О приоритизации",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
@@ -1440,7 +1442,7 @@ fun TaskItemView(
                 }
 
                 Icon(
-                    imageVector = Icons.Rounded.Menu,
+                    imageVector = ImageVector.vectorResource(R.drawable.chevron_expand),
                     contentDescription = "Переместить",
                     tint = Color.LightGray,
                     modifier = with(reorderScope) {
@@ -2051,7 +2053,7 @@ fun AddTaskSheetContent(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        Icons.TwoTone.DateRange,
+                                        ImageVector.vectorResource(R.drawable.hourglass_split),
                                         null,
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(22.dp)

@@ -108,7 +108,8 @@ fun MainScreen() {
     var selectedItem by remember { mutableIntStateOf(1) }
     val haptic = LocalHapticFeedback.current
     val items = listOf("Цели", "Задачи", "Настройки")
-    val icons = listOf(ImageVector.vectorResource(R.drawable.stars), Icons.Filled.List, Icons.Filled.Settings)
+    val icons = listOf(ImageVector.vectorResource(R.drawable.stars), ImageVector.vectorResource(R.drawable.calendar_check_solid),
+        ImageVector.vectorResource(R.drawable.gear))
     var hasInitialized by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedItem) {

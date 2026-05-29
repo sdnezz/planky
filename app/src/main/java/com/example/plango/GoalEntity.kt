@@ -15,12 +15,3 @@ data class GoalEntity(
     val is_completed: Boolean = false,
     val position: Int = 0
 )
-
-data class GoalWithTasks(
-    @Embedded val goal: GoalEntity,
-    @Relation(
-        parentColumn = "id",
-        entityColumn = "goal_id"
-    )
-    val tasks: List<TaskEntity>
-)
