@@ -161,6 +161,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.twotone.Delete
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
@@ -534,7 +535,7 @@ fun TasksScreen(
                 shape = RoundedCornerShape(36.dp),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 64.dp)
+                    .padding(bottom = 78.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
             }
@@ -855,7 +856,7 @@ fun TasksScreen(
                                     pendingRecurringEdit = null
                                 },
                                 shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                                 modifier = Modifier.align(Alignment.CenterEnd)
                             ) {
                                 Box(
@@ -977,8 +978,8 @@ private suspend fun prioritizeDayTasks(
     return run
 }
 
-fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long): String? {
-    if (deadlineMs == null || deadlineMs == 0L) return null
+fun getRemainingTimeText(deadlineMs: Long?, currentTimeMs: Long, is_completed: Boolean?): String? {
+    if (deadlineMs == null || deadlineMs == 0L || is_completed == true) return null
     val diff = deadlineMs - currentTimeMs
     if (diff <= 0) return "просрочено"
 
@@ -1196,7 +1197,7 @@ fun TaskItemView(
                                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 showDeleteDialog = false },
                             shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                         ) {
                             Box(
                                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
@@ -1218,7 +1219,7 @@ fun TaskItemView(
                                 onDeleteTask(task, null)
                             },
                             shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.error
+                            color = Color(0xFFB60000)
                         ) {
                             Box(
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -1226,7 +1227,7 @@ fun TaskItemView(
                             ) {
                                 Text(
                                     text = "ОК",
-                                    color = Color.White,
+                                    color = Color(0xFFFFADAD),
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 14.sp
                                 )
@@ -1273,7 +1274,7 @@ fun TaskItemView(
                                 onDeleteTask(task, RecurrenceDeleteScope.ONLY_THIS_DAY)
                             },
                             shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.error,
+                            color = Color(0xFFB60000),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Box(
@@ -1282,7 +1283,7 @@ fun TaskItemView(
                                     .padding(vertical = 14.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("Только на сегодня", color = Color.White)
+                                Text("Только на сегодня", color = Color(0xFFFFADAD))
                             }
                         }
 
@@ -1293,7 +1294,7 @@ fun TaskItemView(
                                 onDeleteTask(task, RecurrenceDeleteScope.THIS_AND_FUTURE)
                             },
                             shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.error,
+                            color = Color(0xFFB60000),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Box(
@@ -1302,7 +1303,7 @@ fun TaskItemView(
                                     .padding(vertical = 14.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("И все последующие", color = Color.White)
+                                Text("И все последующие", color = Color(0xFFFFADAD))
                             }
                         }
 
@@ -1311,7 +1312,7 @@ fun TaskItemView(
                                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 showRecurringDeleteDialog = false },
                             shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                             modifier = Modifier.align(Alignment.End)
                         ) {
                             Box(
@@ -1437,14 +1438,14 @@ fun TaskItemView(
                     Icon(
                         imageVector = Icons.Outlined.Delete,
                         contentDescription = "Удалить задачу",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                     )
                 }
 
                 Icon(
                     imageVector = ImageVector.vectorResource(R.drawable.chevron_expand),
                     contentDescription = "Переместить",
-                    tint = Color.LightGray,
+                    tint = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
                     modifier = with(reorderScope) {
                         Modifier.draggableHandle(
                             onDragStopped = { onDragStopped() }
@@ -1477,11 +1478,11 @@ fun TaskItemView(
                     }
                 }
 
-                getRemainingTimeText(task.deadline_date, currentTimeMs)?.let {
+                getRemainingTimeText(task.deadline_date, currentTimeMs, task.is_completed)?.let {
                     Text(
                         text = it,
                         fontSize = 11.sp,
-                        color = if (it == "просрочено") Color.Red else Color.Gray
+                        color = if (it == "просрочено") Color(0xFFFF8585) else Color.Gray
                     )
                 }
             }
@@ -1891,7 +1892,7 @@ fun AddTaskSheetContent(
                             label = { Text("Важно", fontSize = 12.sp) },
                             modifier = Modifier.fillMaxWidth().height(43.dp),
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFFFFA726)
+                                selectedContainerColor = Color(0xFFEF5350)
                             )
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1901,7 +1902,7 @@ fun AddTaskSheetContent(
                             label = { Text("Срочно", fontSize = 12.sp) },
                             modifier = Modifier.fillMaxWidth().height(43.dp),
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFFEF5350)
+                                selectedContainerColor = Color(0xFFFFA726)
                             )
                         )
                     }
@@ -2478,7 +2479,7 @@ fun EditTaskSheetContent(
                             label = { Text("Важно", fontSize = 12.sp) },
                             modifier = Modifier.fillMaxWidth().height(43.dp),
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color.Red
+                                selectedContainerColor = Color(0xFFEF5350)
                             )
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -3219,7 +3220,7 @@ fun <T> WheelColumn(
             modifier = Modifier
                 .fillMaxWidth(0.8f)
                 .height(40.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
             shape = RoundedCornerShape(12.dp)
         ) {}
 
@@ -3372,7 +3373,7 @@ fun CompactDatePicker(
                     TextButton(onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                         isMonthYearPickerMode = false }) {
-                        Text("Отмена", fontSize = 14.sp)
+                        Text("Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant,fontSize = 14.sp)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
@@ -3528,6 +3529,7 @@ fun WeekdaySelector(
         DayOfWeek.SATURDAY to "СБ",
         DayOfWeek.SUNDAY to "ВС"
     )
+    val haptic = LocalHapticFeedback.current
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -3535,6 +3537,7 @@ fun WeekdaySelector(
     ) {
         days.forEach { (day, label) ->
             val isSelected = day in selectedDays
+
             Box(
                 modifier = Modifier
                     .size(35.dp)
@@ -3546,6 +3549,7 @@ fun WeekdaySelector(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null)
                     {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                         onSelectionChanged(
                             if (isSelected) selectedDays - day else selectedDays + day
                         )
@@ -3729,7 +3733,7 @@ fun CustomDatePickerDialog(initialDate: LocalDate,
                                 currentMonth = now.withDayOfMonth(1)
                             }
                         ) {
-                            Text("СБРОСИТЬ", color = MaterialTheme.colorScheme.secondary)
+                            Text("СБРОСИТЬ", color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f))
                         }
 
                         Row {
@@ -3916,7 +3920,7 @@ fun YearPickerWheel(initialYear: Int, onYearSelected: (Int) -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth(0.6f)
                     .height(40.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(12.dp)
             ) {}
 
@@ -4063,7 +4067,7 @@ fun <T> WheelPicker(
             modifier = Modifier
                 .fillMaxWidth(0.8f)
                 .height(itemHeight),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
             shape = RoundedCornerShape(12.dp)
         ) {}
 

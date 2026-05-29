@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -59,6 +60,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -122,7 +125,9 @@ fun MainScreen() {
 
     val configuration = LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp.dp
-    val itemWidth = screenWidthDp / items.size
+    val panelPadding = 16.dp
+    val realPanelWidth = screenWidthDp - panelPadding * 2
+    val itemWidth = realPanelWidth / items.size
     val indicatorRadius = 18.dp
     val indicatorVerticalOffset = -indicatorRadius * 0.3f // выступает на 30%
 
@@ -133,7 +138,7 @@ fun MainScreen() {
     var previousSelectedItem by remember { mutableIntStateOf(selectedItem) }
 
     LaunchedEffect(selectedItem) {
-        val targetPx = with(density) { (itemWidth * selectedItem + itemWidth / 2).toPx() }
+        val targetPx = with(density) { (panelPadding + itemWidth * selectedItem + itemWidth / 2).toPx() }
         val initialVelocity = if (selectedItem > previousSelectedItem) 300f else if (selectedItem < previousSelectedItem) -300f else 0f
 
         indicatorPositionPx.animateTo(
@@ -171,19 +176,22 @@ fun MainScreen() {
             }
         }
 
-        // Нижняя панель (отдельный слой, без индикатора)
+        // Нижняя панель
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
-                .align(Alignment.BottomCenter),
+                .padding(horizontal = 16.dp)
+                .height(60.dp) // уменьшили высоту (примерно на 2%)
+                .align(Alignment.BottomCenter)
+                .offset(y = (-16).dp),
+            shape = RoundedCornerShape(32.dp),
             color = MaterialTheme.colorScheme.inverseOnSurface,
             tonalElevation = 3.dp
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 18.dp),
+                    .padding(top = 6.dp), // уменьшили отступ снизу, чтобы контент был по центру
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -191,7 +199,6 @@ fun MainScreen() {
                     val isSelected = selectedItem == index
                     val icon = icons[index]
 
-                    // Анимация прозрачности иконки в панели
                     val iconAlpha by animateFloatAsState(
                         targetValue = if (isSelected) 0f else 1f,
                         animationSpec = tween(durationMillis = 200)
@@ -201,10 +208,15 @@ fun MainScreen() {
                         animationSpec = tween(durationMillis = 200)
                     )
 
-                    Box(
+                    val textColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        animationSpec = tween(durationMillis = 200)
+                    )
+
+                    Column(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxHeight()
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
@@ -213,7 +225,8 @@ fun MainScreen() {
                                     selectedItem = index
                                 }
                             },
-                        contentAlignment = Alignment.Center
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Icon(
                             imageVector = icon,
@@ -227,6 +240,13 @@ fun MainScreen() {
                                     scaleY = iconScale
                                 }
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = items[index],
+                            color = textColor,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
                     }
                 }
             }
@@ -237,8 +257,8 @@ fun MainScreen() {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .offset(
-                    x = indicatorPosition - itemWidth * items.size / 2,
-                    y = indicatorVerticalOffset - 18.dp
+                    x = indicatorPosition - screenWidthDp / 2,
+                    y = indicatorVerticalOffset - 18.dp - 12.dp // скорректировали под новую высоту панели
                 )
                 .size(60.dp),
             contentAlignment = Alignment.Center
@@ -262,7 +282,7 @@ fun MainScreen() {
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                // Анимация горизонтального колебания
+                // Анимация горизонтального колебания (без изменений)
                 val shakeOffset = remember { Animatable(0f) }
                 LaunchedEffect(selectedItem) {
                     shakeOffset.snapTo(0f)

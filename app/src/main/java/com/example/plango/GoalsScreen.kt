@@ -64,12 +64,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.twotone.Delete
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.zIndex
@@ -262,7 +265,7 @@ fun GoalsScreen() {
                         Surface(
                             onClick = { deleteGoalCandidate = null },
                             shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                         ) {
                             Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
                                 Text("Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -277,10 +280,15 @@ fun GoalsScreen() {
                                 }
                             },
                             shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.error
+                            color = Color(0xFFB60000)
                         ) {
                             Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
-                                Text("ОК", color = Color.White)
+                                Text(
+                                    text = "ОК",
+                                    color = Color(0xFFFFADAD),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp
+                                )
                             }
                         }
                     }
@@ -391,14 +399,14 @@ private fun GoalItemView(
                     Icon(
                         imageVector = Icons.Outlined.Delete,
                         contentDescription = "Удалить цель",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                     )
                 }
 
                 Icon(
-                    imageVector = Icons.Rounded.Menu,
+                    imageVector = ImageVector.vectorResource(R.drawable.chevron_expand),
                     contentDescription = "Переместить",
-                    tint = Color.LightGray,
+                    tint = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
                     modifier = with(reorderScope) {
                         Modifier.draggableHandle(
                             onDragStopped = { onDragStopped() }

@@ -35,10 +35,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -65,7 +67,7 @@ private enum class Chronotype(val storageValue: String, val title: String) {
 }
 
 private fun chronotypeDisplayText(value: String?): String {
-    return Chronotype.fromStorage(value)?.title ?: "указать хронотип"
+    return Chronotype.fromStorage(value)?.title ?: "Выбрать"
 }
 
 @Composable
@@ -86,6 +88,8 @@ fun SettingsScreen() {
 
     val currentThemeType = settings?.themeType?.let { AppThemeType.valueOf(it) } ?: AppThemeType.SYSTEM
     val currentAccent = settings?.accentColor?.let { AccentColorOption.valueOf(it) } ?: AccentColorOption.ORANGE
+
+    val haptic = LocalHapticFeedback.current
 
     fun saveSettings(
         themeType: AppThemeType? = null,
@@ -146,7 +150,9 @@ fun SettingsScreen() {
                                 .wrapContentWidth()
                         ) {
                             Surface(
-                                onClick = { showChronotypeSelector = true },
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                    showChronotypeSelector = true },
                                 modifier = Modifier
                                     .onGloballyPositioned {
                                         chronotypeButtonBounds = it.boundsInWindow()
@@ -203,6 +209,7 @@ fun SettingsScreen() {
                                                 text = "Утренний",
                                                 selected = chronotype == Chronotype.MORNING.storageValue,
                                                 onClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                                     saveSettings(chronotypeValue = Chronotype.MORNING.storageValue)
                                                     showChronotypeSelector = false
                                                 }
@@ -212,6 +219,7 @@ fun SettingsScreen() {
                                                 text = "Вечерний",
                                                 selected = chronotype == Chronotype.EVENING.storageValue,
                                                 onClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                                     saveSettings(chronotypeValue = Chronotype.EVENING.storageValue)
                                                     showChronotypeSelector = false
                                                 }
@@ -221,6 +229,7 @@ fun SettingsScreen() {
                                                 text = "Умеренный",
                                                 selected = chronotype == Chronotype.INTERMEDIATE.storageValue,
                                                 onClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                                     saveSettings(chronotypeValue = Chronotype.INTERMEDIATE.storageValue)
                                                     showChronotypeSelector = false
                                                 }
@@ -233,7 +242,11 @@ fun SettingsScreen() {
 
                         Surface(
                             onClick = {
-                                // пока мнимая кнопка
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                val url = "https://psytests.org/trait/meq-run.html" // замените на реальный URL
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                val chooser = android.content.Intent.createChooser(intent, "Выберите браузер")
+                                context.startActivity(chooser)
                             },
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
@@ -297,7 +310,7 @@ fun SettingsScreen() {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("Акцентный цвет", fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         AccentColorOption.values().forEach { option ->
                             val color = option.getColor(
                                 when (currentThemeType) {
@@ -371,6 +384,6 @@ private fun AccentColorDot(color: Color, selected: Boolean, onClick: () -> Unit)
         shape = CircleShape,
         modifier = Modifier.size(30.dp),
         color = color,
-        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant) else null
     ) {}
 }

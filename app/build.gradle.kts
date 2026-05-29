@@ -37,6 +37,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            packaging {
+                jniLibs {
+                    excludes += setOf("**/libtracing_perfetto.so")
+                }
+            }
         }
     }
     compileOptions {
