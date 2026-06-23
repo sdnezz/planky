@@ -87,7 +87,7 @@ fun SettingsScreen() {
     val displayText = chronotypeDisplayText(chronotype)
 
     val currentThemeType = settings?.themeType?.let { AppThemeType.valueOf(it) } ?: AppThemeType.SYSTEM
-    val currentAccent = settings?.accentColor?.let { AccentColorOption.valueOf(it) } ?: AccentColorOption.ORANGE
+    val currentAccent = settings?.accentColor?.let { AccentColorOption.valueOf(it) } ?: AccentColorOption.CYAN
 
     val haptic = LocalHapticFeedback.current
 

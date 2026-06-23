@@ -132,7 +132,7 @@ fun MainScreen() {
     val indicatorVerticalOffset = -indicatorRadius * 0.3f // выступает на 30%
 
     val density = LocalDensity.current
-
+    val systemNavBarHeight = WindowInsets.navigationBars.getBottom(density).dp
     // Позиция индикатора в пикселях
     val indicatorPositionPx = remember { Animatable(0f) }
     var previousSelectedItem by remember { mutableIntStateOf(selectedItem) }
@@ -183,7 +183,9 @@ fun MainScreen() {
                 .padding(horizontal = 16.dp)
                 .height(60.dp) // уменьшили высоту (примерно на 2%)
                 .align(Alignment.BottomCenter)
-                .offset(y = (-16).dp),
+                .offset(y = -systemNavBarHeight/3 - 4.dp)
+//                .padding(bottom = systemNavBarHeight)
+                ,
             shape = RoundedCornerShape(32.dp),
             color = MaterialTheme.colorScheme.inverseOnSurface,
             tonalElevation = 3.dp
@@ -258,7 +260,7 @@ fun MainScreen() {
                 .align(Alignment.BottomCenter)
                 .offset(
                     x = indicatorPosition - screenWidthDp / 2,
-                    y = indicatorVerticalOffset - 18.dp - 12.dp // скорректировали под новую высоту панели
+                    y = indicatorVerticalOffset - 5.dp - 12.dp - systemNavBarHeight/3 // скорректировали под новую высоту панели
                 )
                 .size(60.dp),
             contentAlignment = Alignment.Center

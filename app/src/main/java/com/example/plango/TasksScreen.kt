@@ -1046,8 +1046,9 @@ fun TaskListPage(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 8.dp)
+            .padding(top = 8.dp, bottom = 32.dp)
             .graphicsLayer(clip = false),
+        contentPadding = PaddingValues(bottom = 110.dp),
         state = lazyListState,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
