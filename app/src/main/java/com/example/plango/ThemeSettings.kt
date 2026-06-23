@@ -1,7 +1,5 @@
 package com.example.plango
 
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
 
@@ -15,7 +13,7 @@ object LightAccentColors {
     val Cyan = Color(0xFF00E4FF)
     val Blue = Color(0xFF1BA8FF)
     val Purple = Color(0xFF8800FF)
-    val Pink = Color(0xFFFF2DC2)
+    val Pink = Color(0xFFDA52AC)
 }
 
 // Акцентные цвета для тёмной темы
@@ -28,7 +26,7 @@ object DarkAccentColors {
     val Cyan = Color(0xFF00E3FF)
     val Blue = Color(0xFF44ACFF)
     val Purple = Color(0xFF9325FF)
-    val Pink = Color(0xFFE50089)
+    val Pink = Color(0xFFE10086)
 }
 
 enum class AccentColorOption(val lightColor: Color, val darkColor: Color) {

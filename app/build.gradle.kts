@@ -20,18 +20,19 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-//    signingConfigs {
-//        create("release") {
-//            // Используем дебажный ключ, чтобы просто запустить
-//            storeFile = file("debug.keystore")
-//            storePassword = "android"
-//            keyAlias = "androiddebugkey"
-//            keyPassword = "android"
-//        }
+    signingConfigs {
+        create("release") {
+            // Используем дебажный ключ, чтобы просто запустить
+            storeFile = file("my-release-key.jks")
+            storePassword = "102030405i"
+            keyAlias = "plango-key"
+            keyPassword = "102030405i"
+        }
+    }
 
     buildTypes {
         release {
-//            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
